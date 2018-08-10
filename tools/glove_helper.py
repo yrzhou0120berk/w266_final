@@ -5,7 +5,7 @@ from __future__ import division
 import os
 import collections
 import zipfile
-import vocabulary
+from tools import vocabulary
 
 import numpy as np
 from collections import defaultdict, Counter
