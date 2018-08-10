@@ -1,0 +1,1143 @@
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+#
+# Python-bindings support functions test script
+#
+# Copyright (C) 2010-2018, Joachim Metz <joachim.metz@gmail.com>
+#
+# Refer to AUTHORS for acknowledgements.
+#
+# This software is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this software.  If not, see <http://www.gnu.org/licenses/>.
+
+import unittest
+
+import pysmdev
+
+
+class SupportFunctionsTests(unittest.TestCase):
+  """Tests the support functions."""
+
+  def test_get_version(self):
+    """Tests the get_version function."""
+    version = pysmdev.get_version()
+
+    # TODO: check version.
+    # self.assertEqual(version, "00000000")
+
+
+if __name__ == "__main__":
+  unittest.main(verbosity=2)
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+from urlparse import parse_qs
+
+from twisted.internet import reactor, task, ssl
+from twisted.internet.defer import inlineCallbacks, returnValue
+from twisted.application.internet import ClientService, backoffPolicy
+from twisted.internet.endpoints import clientFromString
+from twisted.internet.protocol import Protocol
+
+from mqtt.client.factory import MQTTFactory
+from flask_restful import fields, marshal
+
+from floranet.appserver.azure_iot import AzureIot
+from floranet.models.application import Application
+from floranet.models.appproperty import AppProperty
+from floranet.models.device import Device
+from floranet.log import log
+        
+class AzureIotMqtt(AzureIot):
+    """LoRa application server interface to Microsoft Azure IoT platform,
+    using MQTT protocol.
+    
+    Attributes:
+        netserver (Netserver): The network server object
+        appinterface (AppInterface): The related AppInterface
+        iothost (str): Azure IOT host name
+        keyname (str): Azure IOT key name
+        keyvalue (str): Azure IOT key value
+        started (bool): State flag
+    """
+    
+    TABLENAME = 'appif_azure_iot_mqtt'
+    HASMANY = [{'name': 'appinterfaces', 'class_name': 'AppInterface', 'as': 'interfaces'}]
+    
+    API_VERSION = '2016-11-14'
+    TOKEN_VALID_SECS = 300
+
+    def afterInit(self):
+        self.netserver = None
+        self.appinterface = None
+        self.started = False
+        self.polling = False
+
+    @inlineCallbacks
+    def valid(self):
+        """Validate an AzureIotHttps object.
+            
+        Returns:
+            valid (bool), message(dict): (True, empty) on success,
+            (False, error message dict) otherwise.
+        """
+        messages = {}
+
+        valid = not any(messages)
+        returnValue((valid, messages))
+        yield
+    
+    def marshal(self):
+        """Get REST API marshalled fields as an orderedDict
+        
+        Returns:
+            OrderedDict of fields defined by marshal_fields
+        """
+        marshal_fields = {
+            'type': fields.String(attribute='__class__.__name__'),
+            'id': fields.Integer(attribute='appinterface.id'),
+            'name': fields.String,
+            'iothost': fields.String,
+            'keyname': fields.String,
+            'keyvalue': fields.String,
+            'started': fields.Boolean,
+        }
+        return marshal(self, marshal_fields)
+    
+    @inlineCallbacks
+    def start(self, netserver):
+        """Start the application interface
+        
+        Args:
+            netserver (NetServer): The LoRa network server
+
+        Returns True on success, False otherwise
+        """
+        self.netserver = netserver
+        
+        # MQTT factory and endpoint
+        self.factory = MQTTFactory(profile=MQTTFactory.PUBLISHER |
+                    MQTTFactory.SUBSCRIBER)
+        self.endpoint = clientFromString(reactor,
+                    'ssl:{}:8883'.format(self.iothost))
+        
+        # Set the running flag
+        self.started = True
+        
+        returnValue(True)
+        yield
+
+    @inlineCallbacks
+    def stop(self):
+        """Stop the application interface"""
+        
+        self.started = False
+    
+    @inlineCallbacks
+    def netServerReceived(self, device, app, port, appdata):
+        """Receive application data from the network server
+        
+        We publish outbound appdata to the Azure IOT hub host, and
+        receive inbound messages, via MQTT.
+        
+        Args:
+            device (Device): LoRa device object
+            app (Application): device's application
+            port (int): fport of the frame payload
+            appdata (str): Application data
+        """
+        if not self.started:
+            returnValue(None)
+        
+        # Map the device name the Azure IOT deviceId
+        devid = device.appname if device.appname else device.name
+        
+        prop = yield AppProperty.find(where=['application_id = ? and port = ?',
+                               app.id, port], limit=1)
+        
+        # If the property is not found, send the data as is.
+        if prop is None:
+            data = appdata
+        else:
+            # Create the Azure message. If not mapped, transparently send appdata
+            data = self._azureMessage(devid, prop, appdata)
+            if data is None:
+                log.debug("Application interface {name} could not create "
+                          "message for property {prop}", name=self.name, prop=prop.name)
+                returnValue(None)
+
+        resuri = '{}/devices/{}'.format("fluentiothub.azure-devices.net", devid)
+        username = 'fluentiothub.azure-devices.net/{}/api-version={}'.format(
+            devid, self.API_VERSION)
+        password = self._iotHubSasToken(resuri)
+
+        service = MQTTService(self.endpoint, self.factory, devid, username, password)
+        messages = yield service.publishMessage(appdata)
+        
+        for m in messages:
+            self.netserver.netServerReceived(device.devaddr, m)
+
+class MQTTService(object):
+    """MQTT Service interface to Azure IoT hub.
+    
+    Attributes:
+        client: (ClientService): Twisted client service
+        connected (bool): Service connection flag
+        devid (str): Device identifer
+        username: (str): Azure IoT Hub MQTT username
+        password: (str): Azure IoT Hub MQTT password
+        messages (list): Received inbound messages
+    """
+
+    TIMEOUT = 10.0
+
+    def __init__(self, endpoint, factory, devid, username, password):
+        
+        self.client = ClientService(endpoint, factory)
+        self.connected = False
+        self.devid = devid
+        self.username = username
+        self.password = password
+        self.messages = []
+
+    @inlineCallbacks
+    def publishMessage(self, data):
+        """Publish the MQTT message.
+        
+        Any inbound messages are copied to the messages list attribute,
+        and returned to the caller.
+        
+        Args:
+            data (str): Application data to send
+            
+        Returns:
+            A list of received messages.
+        """
+        # Start the service, and add a timeout to check the connection.
+        self.client.startService()
+        reactor.callLater(self.TIMEOUT, self.checkConnection)
+        
+        # Attempt to connect. If we tiemout and cancel and exception
+        # is thrown.
+        try:
+            yield self.client.whenConnected().addCallback(
+                self.azureConnect, data)        
+        except Exception as e:
+            log.error("Azure MQTT service failed to connect to broker.")
+            
+        # Stop the service if sucessful, and finally return
+        # any inbound messages.
+        else:            
+            yield self.client.stopService()
+        finally:
+            returnValue(self.messages)
+
+    @inlineCallbacks
+    def checkConnection(self):
+        """Check if the connected flag is set.
+        
+        Stop the service if not.
+        """
+        if not self.connected:
+            yield self.client.stopService()
+
+    @inlineCallbacks
+    def azureConnect(self, protocol, data):
+        
+        self.connected = True
+        protocol.setWindowSize(1)
+        protocol.onPublish = self.onPublish
+        
+        pubtopic = 'devices/{}/messages/events/'.format(self.devid)
+        subtopic = 'devices/{}/messages/devicebound/#'.format(self.devid)
+
+        try:
+            # Connect and subscribe
+            yield protocol.connect(self.devid, username=self.username,
+                        password=self.password, cleanStart=False, keepalive=10)
+            yield protocol.subscribe(subtopic, 2)
+        except Exception as e:
+            log.error("Azure MQTT service could not connect to "
+                          "Azure IOT Hub using username {name}",
+                          name=self.username)
+            returnValue(None)
+        
+        # Publish the outbound message
+        yield protocol.publish(topic=pubtopic, qos=0, message=str(data))
+
+    def onPublish(self, topic, payload, qos, dup, retain, msgId):
+        """Receive messages from Azure IoT Hub
+        
+        IoT Hub delivers messages with the Topic Name
+        devices/{device_id}/messages/devicebound/ or
+        devices/{device_id}/messages/devicebound/{property_bag}
+        if there are any message properties. {property_bag} contains
+        url-encoded key/value pairs of message properties.
+        System property names have the prefix $, application properties
+        use the original property name with no prefix.
+        """
+        message = ''
+        
+        # Split the component parameters of topic. Obtain the downstream message
+        # using the key name message.
+        params = parse_qs(topic)
+        if 'message' in params:
+            self.messages.append(params['message'])
+            
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+#
+# ovirt-engine-setup -- ovirt engine setup
+# Copyright (C) 2013-2015 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
+"""ovirt-host-setup system plugin."""
+
+
+from otopi import util
+
+from . import engine
+from . import exportfs
+from . import image_upload
+from . import memcheck
+from . import nfs
+
+
+@util.export
+def createPlugins(context):
+    engine.Plugin(context=context)
+    memcheck.Plugin(context=context)
+    nfs.Plugin(context=context)
+    exportfs.Plugin(context=context)
+    image_upload.Plugin(context=context)
+
+
+# vim: expandtab tabstop=4 shiftwidth=4
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+"""
+sync peeringdb tables
+"""
+from __future__ import print_function
+
+import calendar
+import logging
+import re
+from optparse import make_option
+from twentyc.rpc import RestClient
+
+import django.core.exceptions
+from django.core.management.base import BaseCommand
+from django_peeringdb import settings, sync
+
+import django_peeringdb.models
+from django_peeringdb.models.concrete import (
+  Organization,
+  Network,
+  InternetExchange,
+  Facility,
+  NetworkContact,
+  NetworkIXLan,
+  NetworkFacility,
+  InternetExchangeFacility
+)
+
+from django.apps import apps
+
+
+def get_model(name):
+    return apps.get_model('django_peeringdb', name)
+
+
+class Command(BaseCommand):
+    help = "synchronize local tables to PeeringDB"
+
+    option_list = getattr(BaseCommand, 'option_list', ()) + (
+        make_option('-n', '--dry-run',
+            action='store_true',
+            default=False,
+            help='enable extra debug output'),
+        make_option('--debug',
+            action='store_true',
+            default=False,
+            help='enable extra debug output'),
+        make_option('--only',
+            action='store',
+            default=False,
+            help='only process this table'),
+        make_option('--id',
+            action='store',
+            default=0,
+            help='only process this id'),
+        make_option('--limit',
+            type=int,
+            default=0,
+            help="limit objects retrieved, retrieve all objects if 0 (default)"),
+        )
+
+    def handle(self, *args, **options):
+        self.log = logging.getLogger('peeringdb.sync')
+
+        kwargs = {}
+        if settings.SYNC_USERNAME:
+            kwargs['user'] = settings.SYNC_USERNAME
+            kwargs['password'] = settings.SYNC_PASSWORD
+
+        self.log.debug("syncing from %s", settings.SYNC_URL)
+        self.connect(settings.SYNC_URL, **kwargs)
+
+        # get models if limited by config
+        only = options.get('only', settings.SYNC_ONLY)
+        self.log.debug("only tables %s", only)
+
+        pk = options.get('id', 0)
+
+        tables = self.get_class_list(only)
+        limit = options.get("limit", 0)
+
+        self.dry_run = options.get('dry_run', False)
+
+        # disable auto now
+        for model in tables:
+            for field in model._meta.fields:
+                if field.name == "created":
+                    field.auto_now_add = False
+                if field.name == "updated":
+                    field.auto_now = False
+
+        self.sync(tables, pk, limit=limit)
+
+    def connect(self, url, **kwargs):
+        self.rpc = RestClient(url, **kwargs)
+
+    def sync(self, tables, pk=0, **kwargs):
+        for cls in tables:
+            self.update_db(cls, self.get_objs(cls, pk=pk, **kwargs))
+
+    def get_class_list(self, only=None):
+        tables = []
+        if only:
+            for name in only:
+                tables.append(get_model(name))
+        else:
+            tables = django_peeringdb.models.all_models
+        return tables
+
+    def get_since(self, cls):
+        upd = cls.handleref.last_change()
+        if upd:
+            return int(calendar.timegm(upd.timetuple()))
+        return 0
+
+    def get_data(self, cls, since):
+        return self.rpc.all(cls._handleref.tag, since=since)
+
+    def get_objs(self, cls, **kwargs):
+        pk = int(kwargs.pop('pk', 0))
+        if pk:
+            self.log.debug("getting single id=%d", pk)
+            data = self.rpc.all(cls._handleref.tag, id=pk, **kwargs)
+            print("%s==%d %d changed" % (cls._handleref.tag, pk, len(data)))
+
+        else:
+            since = self.get_since(cls)
+            data = self.rpc.all(cls._handleref.tag, since=since, **kwargs)
+            print("%s last update %s %d changed" % (cls._handleref.tag, str(since), len(data)))
+
+        return data
+
+    def cls_from_tag(self, tag):
+        tables = self.get_class_list()
+        for cls in tables:
+            if cls._handleref.tag == tag:
+                return cls
+        raise Exception("Unknown reftag: %s" % tag)
+
+    def _sync(self, cls, row):
+        """
+        Try to sync an object to the local database, in case of failure
+        where a referenced object is not found, attempt to fetch said 
+        object from the REST api
+        """
+        if self.dry_run:
+            return
+
+        try:
+            sync.sync_obj(cls, row)
+
+        except django.core.exceptions.ObjectDoesNotExist as e:
+            # thrown by subquery on single row
+            print(e)
+            raise
+
+        except django.core.exceptions.ValidationError as inst:
+            # There were validation errors
+            for field, errlst in inst.error_dict.items():
+                # check if it was a relationship that doesnt exist locally
+                m = re.match(".+ with id (\d+) does not exist.+", str(errlst))
+                if m:
+                    print("%s.%s not found locally, trying to fetch object... " % (field, m.group(1)))
+                    # fetch missing object
+                    r = self.rpc.get(field, int(m.group(1)), depth=0)
+
+                    # sync missing object
+                    self._sync(self.cls_from_tag(field), r[0])
+                else:
+                    raise
+           
+            # try to sync initial object once more
+            sync.sync_obj(cls, row)
+
+    def update_db(self, cls, data):
+        print("data to be processed", len(data))
+        if not data:
+            return
+
+        for row in data:
+            self._sync(cls, row)
+
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+"""
+    pygments.filter
+    ~~~~~~~~~~~~~~~
+
+    Module that implements the default filter.
+
+    :copyright: Copyright 2006-2015 by the Pygments team, see AUTHORS.
+    :license: BSD, see LICENSE for details.
+"""
+
+
+def apply_filters(stream, filters, lexer=None):
+    """
+    Use this method to apply an iterable of filters to
+    a stream. If lexer is given it's forwarded to the
+    filter, otherwise the filter receives `None`.
+    """
+    def _apply(filter_, stream):
+        for token in filter_.filter(lexer, stream):
+            yield token
+    for filter_ in filters:
+        stream = _apply(filter_, stream)
+    return stream
+
+
+def simplefilter(f):
+    """
+    Decorator that converts a function into a filter::
+
+        @simplefilter
+        def lowercase(self, lexer, stream, options):
+            for ttype, value in stream:
+                yield ttype, value.lower()
+    """
+    return type(f.__name__, (FunctionFilter,), {
+                'function':     f,
+                '__module__':   getattr(f, '__module__'),
+                '__doc__':      f.__doc__
+            })
+
+
+class Filter(object):
+    """
+    Default filter. Subclass this class or use the `simplefilter`
+    decorator to create own filters.
+    """
+
+    def __init__(self, **options):
+        self.options = options
+
+    def filter(self, lexer, stream):
+        raise NotImplementedError()
+
+
+class FunctionFilter(Filter):
+    """
+    Abstract class used by `simplefilter` to create simple
+    function filters on the fly. The `simplefilter` decorator
+    automatically creates subclasses of this class for
+    functions passed to it.
+    """
+    function = None
+
+    def __init__(self, **options):
+        if not hasattr(self, 'function'):
+            raise TypeError('%r used without bound function' %
+                            self.__class__.__name__)
+        Filter.__init__(self, **options)
+
+    def filter(self, lexer, stream):
+        # pylint: disable-msg=E1102
+        for ttype, value in self.function(lexer, stream, self.options):
+            yield ttype, value
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+"""
+This package offers ways to retreive ip addresses of the machine, and map ports
+through UPnP devices.
+
+@author: Raphael Slinckx
+@copyright: Copyright 2005
+@license: LGPL
+@contact: U{raphael@slinckx.net<mailto:raphael@slinckx.net>}
+@version: 0.1.0
+"""
+__revision__ = "$id"
+
+from nattraverso.pynupnp.upnp import search_upnp_device, UPnPMapper
+
+def get_external_ip():
+    """
+    Returns a deferred which will be called with the WAN ip address
+    retreived through UPnP. The ip is a string of the form "x.x.x.x"
+    
+    @return: A deferred called with the external ip address of this host
+    @rtype: L{twisted.internet.defer.Deferred}
+    """
+    return search_upnp_device().addCallback(lambda x: x.get_external_ip())
+
+def get_port_mapper():
+    """
+    Returns a deferred which will be called with a L{UPnPMapper} instance.
+    This is a L{nattraverso.portmapper.NATMapper} implementation.
+    
+    @return: A deferred called with the L{UPnPMapper} instance.
+    @rtype: L{twisted.internet.defer.Deferred}
+    """
+    return search_upnp_device().addCallback(lambda x: UPnPMapper(x))
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+# HORTON: Helpful Open-source Research TOol for N-fermion systems.
+# Copyright (C) 2011-2017 The HORTON Development Team
+#
+# This file is part of HORTON.
+#
+# HORTON is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# HORTON is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <http://www.gnu.org/licenses/>
+#
+# --
+'''Molekel wavefunction input file format'''
+
+
+import numpy as np
+
+from horton.units import angstrom
+from horton.io.molden import _fix_molden_from_buggy_codes
+from horton.gbasis.iobas import str_to_shell_types
+from horton.gbasis.gobasis import GOBasis
+from horton.meanfield.orbitals import Orbitals
+
+
+__all__ = ['load_mkl']
+
+
+def load_mkl(filename):
+    '''Load data from a Molekel file.
+
+    Parameters
+    ----------
+    filename : str
+        The filename of the mkl file.
+
+    Returns
+    -------
+    results : dict
+        Data loaded from file, with keys: ``coordinates``, ``numbers``, ``obasis``,
+        ``orb_alpha``. It may also contain: ``orb_beta``, ``signs``.
+    '''
+
+    def helper_char_mult(f):
+        return [int(word) for word in f.readline().split()]
+
+
+    def helper_coordinates(f):
+        numbers = []
+        coordinates = []
+        while True:
+            line = f.readline()
+            if len(line) == 0 or line.strip() == '$END':
+                break
+            words = line.split()
+            numbers.append(int(words[0]))
+            coordinates.append([float(words[1]), float(words[2]), float(words[3])])
+        numbers = np.array(numbers, int)
+        coordinates = np.array(coordinates)*angstrom
+        return numbers, coordinates
+
+
+    def helper_obasis(f, coordinates):
+        shell_types = []
+        shell_map = []
+        nprims = []
+        alphas = []
+        con_coeffs = []
+
+        center_counter = 0
+        in_shell = False
+        nprim = None
+        while True:
+            line = f.readline()
+            lstrip = line.strip()
+            if len(line) == 0 or lstrip == '$END':
+                break
+            if len(lstrip) == 0:
+                continue
+            if lstrip == '$$':
+                center_counter += 1
+                in_shell = False
+            else:
+                words = line.split()
+                if len(words) == 2:
+                    assert in_shell
+                    alpha = float(words[0])
+                    alphas.append(alpha)
+                    con_coeffs.append(float(words[1]))
+                    nprim += 1
+                else:
+                    if nprim is not None:
+                        nprims.append(nprim)
+                    shell_map.append(center_counter)
+                    # always assume pure basis functions
+                    shell_type = str_to_shell_types(words[1], pure=True)[0]
+                    shell_types.append(shell_type)
+                    in_shell = True
+                    nprim = 0
+        if nprim is not None:
+            nprims.append(nprim)
+
+        shell_map = np.array(shell_map)
+        nprims = np.array(nprims)
+        shell_types = np.array(shell_types)
+        alphas = np.array(alphas)
+        con_coeffs = np.array(con_coeffs)
+        return GOBasis(coordinates, shell_map, nprims, shell_types, alphas, con_coeffs)
+
+
+    def helper_coeffs(f, nbasis):
+        coeffs = []
+        energies = []
+
+        in_orb = 0
+        while True:
+            line = f.readline()
+            lstrip = line.strip()
+            if len(line) == 0 or lstrip == '$END':
+                break
+            if in_orb == 0:
+                # read a1g line
+                words = lstrip.split()
+                ncol = len(words)
+                assert ncol > 0
+                for word in words:
+                    assert word == 'a1g'
+                cols = [np.zeros((nbasis,1), float) for icol in xrange(ncol)]
+                in_orb = 1
+            elif in_orb == 1:
+                # read energies
+                words = lstrip.split()
+                assert len(words) == ncol
+                for word in words:
+                    energies.append(float(word))
+                in_orb = 2
+                ibasis = 0
+            elif in_orb == 2:
+                # read expansion coefficients
+                words = lstrip.split()
+                assert len(words) == ncol
+                for icol in xrange(ncol):
+                    cols[icol][ibasis] = float(words[icol])
+                ibasis += 1
+                if ibasis == nbasis:
+                    in_orb = 0
+                    coeffs.extend(cols)
+
+        return np.hstack(coeffs), np.array(energies)
+
+
+    def helper_occ(f):
+        occs = []
+        while True:
+            line = f.readline()
+            lstrip = line.strip()
+            if len(line) == 0 or lstrip == '$END':
+                break
+            for word in lstrip.split():
+                occs.append(float(word))
+        return np.array(occs)
+
+
+    charge = None
+    spinmult = None
+    numbers = None
+    coordinates = None
+    obasis = None
+    coeff_alpha = None
+    ener_alpha = None
+    occ_alpha = None
+    coeff_beta = None
+    ener_beta = None
+    occ_beta = None
+    with open(filename) as f:
+        while True:
+            line = f.readline()
+            if len(line) == 0:
+                break
+            line = line.strip()
+            if line == '$CHAR_MULT':
+                charge, spinmult = helper_char_mult(f)
+            elif line == '$COORD':
+                numbers, coordinates = helper_coordinates(f)
+            elif line == '$BASIS':
+                obasis = helper_obasis(f, coordinates)
+            elif line == '$COEFF_ALPHA':
+                coeff_alpha, ener_alpha = helper_coeffs(f, obasis.nbasis)
+            elif line == '$OCC_ALPHA':
+                occ_alpha = helper_occ(f)
+            elif line == '$COEFF_BETA':
+                coeff_beta, ener_beta = helper_coeffs(f, obasis.nbasis)
+            elif line == '$OCC_BETA':
+                occ_beta = helper_occ(f)
+
+    if charge is None:
+        raise IOError('Charge and multiplicity not found in mkl file.')
+    if coordinates is None:
+        raise IOError('Coordinates not found in mkl file.')
+    if obasis is None:
+        raise IOError('Orbital basis not found in mkl file.')
+    if coeff_alpha is None:
+        raise IOError('Alpha orbitals not found in mkl file.')
+    if occ_alpha is None:
+        raise IOError('Alpha occupation numbers not found in mkl file.')
+
+    nelec = numbers.sum() - charge
+    if coeff_beta is None:
+        assert nelec % 2 == 0
+        assert abs(occ_alpha.sum() - nelec) < 1e-7
+        orb_alpha = Orbitals(obasis.nbasis, coeff_alpha.shape[1])
+        orb_alpha.coeffs[:] = coeff_alpha
+        orb_alpha.energies[:] = ener_alpha
+        orb_alpha.occupations[:] = occ_alpha/2
+        orb_beta = None
+    else:
+        if occ_beta is None:
+            raise IOError('Beta occupation numbers not found in mkl file while beta orbitals were present.')
+        nalpha = int(np.round(occ_alpha.sum()))
+        nbeta = int(np.round(occ_beta.sum()))
+        assert nelec == nalpha+nbeta
+        assert coeff_alpha.shape == coeff_beta.shape
+        assert ener_alpha.shape == ener_beta.shape
+        assert occ_alpha.shape == occ_beta.shape
+        orb_alpha = Orbitals(obasis.nbasis, coeff_alpha.shape[1])
+        orb_alpha.coeffs[:] = coeff_alpha
+        orb_alpha.energies[:] = ener_alpha
+        orb_alpha.occupations[:] = occ_alpha
+        orb_beta = Orbitals(obasis.nbasis, coeff_beta.shape[1])
+        orb_beta.coeffs[:] = coeff_beta
+        orb_beta.energies[:] = ener_beta
+        orb_beta.occupations[:] = occ_beta
+
+    result = {
+        'coordinates': coordinates,
+        'orb_alpha': orb_alpha,
+        'numbers': numbers,
+        'obasis': obasis,
+    }
+    if orb_beta is not None:
+        result['orb_beta'] = orb_beta
+    _fix_molden_from_buggy_codes(result, filename)
+    return result
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+# coding=utf-8
+
+"""Definitions relating to group of fields."""
+
+from safe.definitions.concepts import concepts
+from safe.definitions.field_groups.age_field_group import (
+    age_ratio_group,
+    age_count_group,
+    age_displaced_count_group)
+from safe.definitions.field_groups.age_vulnerability_field_group import (
+    age_vulnerability_ratio_group,
+    age_vulnerability_count_group,
+    age_vulnerability_displaced_count_group)
+from safe.definitions.field_groups.disability_vulnerability_field_group \
+    import (
+        disability_vulnerability_ratio_group,
+        disability_vulnerability_count_group,
+        disability_vulnerability_displaced_count_group)
+from safe.definitions.field_groups.gender_field_group import (
+    gender_ratio_group,
+    gender_count_group,
+    gender_displaced_count_group)
+from safe.definitions.field_groups.gender_vulnerability_field_group import (
+    gender_vulnerability_ratio_group,
+    gender_vulnerability_count_group,
+    gender_vulnerability_displaced_count_group)
+from safe.utilities.i18n import tr
+
+__copyright__ = "Copyright 2017, The InaSAFE Project"
+__license__ = "GPL version 3"
+__email__ = "info@inasafe.org"
+__revision__ = '$Format:%H$'
+
+aggregation_field_groups = [
+    age_ratio_group,
+    gender_ratio_group,
+    age_vulnerability_ratio_group,
+    gender_vulnerability_ratio_group,
+    disability_vulnerability_ratio_group
+]
+
+population_field_groups = [
+    age_count_group,
+    gender_count_group,
+    age_vulnerability_count_group,
+    gender_vulnerability_count_group,
+    disability_vulnerability_count_group
+]
+
+# Count ratio pairs field group
+count_ratio_group_pairs = [
+    (gender_count_group, gender_ratio_group),
+    (age_count_group, age_ratio_group),
+    (age_vulnerability_count_group, age_vulnerability_ratio_group),
+    (gender_vulnerability_count_group, gender_vulnerability_ratio_group),
+    (disability_vulnerability_count_group,
+     disability_vulnerability_ratio_group)
+]
+
+
+# This table is useful when we need to match between counts and ratios.
+count_ratio_mapping = {
+    # feature_value_field['key']: feature_rate_field['key'], disabled V4.0 ET
+}
+
+# Generate count ratio mapping from the count ratio field group pairs
+for count_ratio_pair in count_ratio_group_pairs:
+    count_fields = count_ratio_pair[0]['fields']
+    ratio_fields = count_ratio_pair[1]['fields']
+    for index in range(len(count_fields)):
+        count_ratio_mapping[
+            count_fields[index]['key']] = ratio_fields[index]['key']
+
+all_field_groups = [
+    age_ratio_group,
+    age_count_group,
+    age_displaced_count_group,
+    gender_ratio_group,
+    gender_count_group,
+    gender_displaced_count_group,
+    disability_vulnerability_ratio_group,
+    disability_vulnerability_count_group,
+    disability_vulnerability_displaced_count_group,
+    gender_vulnerability_ratio_group,
+    gender_vulnerability_count_group,
+    gender_vulnerability_displaced_count_group,
+    age_vulnerability_ratio_group,
+    age_vulnerability_count_group,
+    age_vulnerability_displaced_count_group
+]
+
+# Update notes for each group
+age_group_notes = [
+    tr('Infant: {note}').format(note=concepts['infant']['description']),
+    tr('Child: {note}').format(note=concepts['child']['description']),
+    tr('Youth: {note}').format(note=concepts['youth']['description']),
+    tr('Adult: {note}').format(note=concepts['adult']['description']),
+    tr('Elderly: {note}').format(note=concepts['elderly']['description'])
+]
+
+gender_group_notes = [
+    tr('Male: {note}').format(note=concepts['male']['description']),
+    tr('Female: {note}').format(note=concepts['female']['description']),
+]
+
+age_vulnerability_group_notes = [
+    tr('Under 5: {note}').format(note=concepts['under_5']['description']),
+    tr('Over 60: {note}').format(note=concepts['over_60']['description']),
+]
+
+gender_vulnerability_group_notes = [
+    tr('Child bearing age: {note}').format(
+        note=concepts['child_bearing_age']['description']),
+    tr('Pregnant: {note}').format(
+        note=concepts['pregnant']['description']),
+    tr('Lactating: {note}').format(
+        note=concepts['lactating']['description'])
+]
+
+disability_vulnerability_group_notes = [
+    tr('Disabled: {note}').format(note=concepts['disabled']['description'])
+]
+
+age_ratio_group['notes'] += age_group_notes
+age_count_group['notes'] += age_group_notes
+age_displaced_count_group['notes'] += age_group_notes
+gender_ratio_group['notes'] += gender_group_notes
+gender_count_group['notes'] += gender_group_notes
+gender_displaced_count_group['notes'] += gender_group_notes
+age_vulnerability_ratio_group['notes'] += age_vulnerability_group_notes
+age_vulnerability_count_group['notes'] += age_vulnerability_group_notes
+age_vulnerability_displaced_count_group['notes'] += \
+    age_vulnerability_group_notes
+gender_vulnerability_ratio_group['notes'] += \
+    gender_vulnerability_group_notes
+gender_vulnerability_count_group['notes'] += \
+    gender_vulnerability_group_notes
+gender_vulnerability_displaced_count_group['notes'] += \
+    gender_vulnerability_group_notes
+disability_vulnerability_ratio_group['notes'] += \
+    disability_vulnerability_group_notes
+disability_vulnerability_count_group['notes'] += \
+    disability_vulnerability_group_notes
+disability_vulnerability_displaced_count_group['notes'] += \
+    disability_vulnerability_group_notes
+
+# see issue #4334
+
+# for field_group in all_field_groups:
+#     field_group['notes'].insert(
+#         0,
+#         tr('{group_name} group: {note}').format(
+#             group_name=field_group['name'],
+#             note=field_group['description']))
+#     del field_group  # to prevent duplicate definition
+
+displaced_field_groups = [
+    age_displaced_count_group,
+    gender_displaced_count_group,
+    age_vulnerability_displaced_count_group,
+    gender_vulnerability_displaced_count_group,
+    disability_vulnerability_displaced_count_group
+]
+
+vulnerability_displaced_count_groups = [
+    age_vulnerability_displaced_count_group,
+    gender_vulnerability_displaced_count_group,
+    disability_vulnerability_displaced_count_group
+]
+
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+from loggers import Actions
+from stopping_decision_makers.base_decision_maker import BaseDecisionMaker
+
+class SequentialNonrelDecisionMakerSkip(BaseDecisionMaker):
+    """
+    A concrete implementation of a decision maker.
+    Returns True iif the depth at which a user is in a SERP is less than a predetermined value.
+    """
+    def __init__(self, search_context, logger, nonrelevant_threshold=3):
+        super(SequentialNonrelDecisionMakerSkip, self).__init__(search_context, logger)
+        self.__nonrelevant_threshold = nonrelevant_threshold  # The threshold; get to this point, we stop in the current SERP.
+
+    def decide(self):
+        """
+        If the user's current position in the current SERP is < the maximum depth, look at the next snippet in the SERP.
+        Otherwise, a new query should be issued.
+        """
+        counter = 0
+        examined_snippets = self._search_context.get_examined_snippets()
+        previous = []
+        
+        for snippet in examined_snippets:
+            judgment = snippet.judgment
+            
+            if judgment == 0:
+                if self.__get_previous_judgment(previous, snippet) != 0:
+                    counter = counter + 1
+
+                    if counter == self.__nonrelevant_threshold:
+                        return Actions.QUERY
+            else:
+                # Reset the counter; we have seen a relevant document! Either seen previously or not seen previously.
+                counter = 0
+            
+            previous.append(snippet)
+        
+        return Actions.SNIPPET
+        
+    def __get_previous_judgment(self, previously_seen, snippet):
+        """
+        Looking through the list of previously examined snippets, returns the judgment for that snippet.
+        If the snippet has not been seen before, -1 is returned.
+        """
+        for previous_snippet in previously_seen:
+            if previous_snippet.doc_id == snippet.doc_id:
+                return previous_snippet.judgment
+
+        return -1
+Query: LSTM model for semantic search
+
+************************** NEXT RESULT **************************************
+"""Sphinx ReadTheDocs theme.
+
+From https://github.com/ryan-roemer/sphinx-bootstrap-theme.
+
+"""
+import os
+
+VERSION = (0, 1, 7)
+
+__version__ = ".".join(str(v) for v in VERSION)
+__version_full__ = __version__
+
+
+def get_html_theme_path():
+    """Return list of HTML theme paths."""
+    cur_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    return cur_dir
+

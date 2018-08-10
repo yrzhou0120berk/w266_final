@@ -1,0 +1,1811 @@
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+"""
+Part of the World Generator project. 
+
+author:  Bret Curtis
+license: LGPL v2
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+version 2 as published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+02110-1301 USA
+"""
+import sys
+from numpy import zeros
+
+if __name__ == '__main__': # handle multiple entry points
+    from constants import *
+else:
+    from .constants import *
+
+class Biomes():
+
+    def __init__(self, *args, **kwargs):
+        if len(args) == 0:
+            pass
+        elif len(args) == 5:
+            self.heightmap = args[0]
+            self.rainmap = args[1]
+            self.drainmap = args[2]
+            self.temperature = args[3]
+            self.worldW = len(self.heightmap)
+            self.worldH = len(self.heightmap[0])
+            self.biome = zeros((self.worldW, self.worldH))
+            self.biomeColourCode = zeros((self.worldW, self.worldH))
+            self.seaLevel = args[4] / 100.0 # reduce to 0.0 - 1.0 range
+            
+        else:
+            sys.exit('0 or 4 arguments only')
+
+    def run(self):
+        # calculate biome -- from scale of 0-400 ((oldValue-0) * (100-0)) / (400-0) + 0
+        for x in range(self.worldW):
+            for y in range(self.worldH):
+                
+                # new way
+                # for debugging, all areas are set to undefined
+                self.biome[x, y] = BIOME_TYPE_UNDEFINED
+                self.biomeColourCode[x, y] = COLOR_RED                
+                
+                # basic biome information based on elevation
+                if self.heightmap[x,y] <= self.seaLevel:       
+                    self.biome[x, y] = BIOME_TYPE_WATER         # Sealevel: e1-99 (0-98)
+                    self.biomeColourCode[x, y] = COLOR_BLUE
+                elif self.heightmap[x, y] > 0.75 and self.heightmap[x, y] <= 0.83:                     
+                    self.biome[x, y] = BIOME_TYPE_MOUNTAIN_LOW  # Mountain (Low): e300-332
+                    self.biomeColourCode[x, y] = COLOR_GRAY
+                elif self.heightmap[x, y] > 0.83 and self.heightmap[x, y] <= 0.91:            
+                    self.biome[x, y] = BIOME_TYPE_MOUNTAIN      # Mountain: e333-365
+                    self.biomeColourCode[x, y] = COLOR_ASH_GRAY
+                elif self.heightmap[x, y] > 0.91 and self.heightmap[x, y] <= 1.00:               
+                    self.biome[x, y] = BIOME_TYPE_MOUNTAIN_HIGH # Mountain (High): e366-400
+                    self.biomeColourCode[x, y] = COLOR_IVORY
+                else: # all other biomes are between elevations of 100 and 299 (25-74)
+                    if self.rainmap[x, y] < 0.10: # all rainfall between 0 and 9
+                        if self.drainmap[x, y] < 0.33:    # Desert (Sand): d0-32
+                            self.biome[x, y] = BIOME_TYPE_DESERT_SAND
+                            self.biomeColourCode[x, y] = COLOR_GOLDEN_YELLOW
+                        elif self.drainmap[x, y] < 0.50:    # Desert (Rock): d33-49
+                            self.biome[x, y] = BIOME_TYPE_DESERT_ROCK
+                            self.biomeColourCode[x, y] = COLOR_DARK_CHESTNUT
+                        else: # Desert (Badlands): r0-9, d50-100
+                            self.biome[x, y] = BIOME_TYPE_DESERT_BADLANDS
+                            self.biomeColourCode[x, y] = COLOR_TAUPE_PALE
+                    elif self.rainmap[x, y] >= 0.10 and self.rainmap[x, y] < 0.20:
+                        if self.drainmap[x, y] < 0.51:    # Grassland: r10-19, d0-50
+                            self.biome[x, y] = BIOME_TYPE_GRASSLAND
+                            self.biomeColourCode[x, y] = COLOR_GREEN
+                        else: # Hills: r10-65, d50-100
+                            self.biome[x, y] = BIOME_TYPE_HILLS
+                            self.biomeColourCode[x, y] = COLOR_EMERALD                            
+                    elif self.rainmap[x, y] >= 0.20 and self.rainmap[x, y] < 0.33:
+                        if self.drainmap[x, y] < 0.50:    # Savanna: r20-32, d0-50
+                            self.biome[x, y] = BIOME_TYPE_SAVANNA
+                            self.biomeColourCode[x, y] = COLOR_GREEN_YELLOW
+                        elif self.drainmap[x, y] < 0.80: # Hills: r10-65, d50-100
+                            self.biome[x, y] = BIOME_TYPE_HILLS
+                            self.biomeColourCode[x, y] = COLOR_EMERALD
+                        else:
+                            self.biome[x, y] = BIOME_TYPE_FOREST
+                            self.biomeColourCode[x, y] = COLOR_DARK_GREEN                                                          
+                    elif self.rainmap[x, y] >= 0.33 and self.rainmap[x, y] < 0.66:
+                        if self.drainmap[x, y] < 0.33:    # Marsh: r33-65, d0-32
+                            self.biome[x, y] = BIOME_TYPE_MARSH
+                            self.biomeColourCode[x, y] = 0x2B2E26
+                        elif self.drainmap[x, y] < 0.50:    # Shrubland: r33-65, d33-49
+                            self.biome[x, y] = BIOME_TYPE_SHRUBLAND
+                            self.biomeColourCode[x, y] = COLOR_FERN_GREEN
+                        elif self.drainmap[x, y] < 0.80:
+                            self.biome[x, y] = BIOME_TYPE_HILLS
+                            self.biomeColourCode[x, y] = COLOR_EMERALD
+                        else: # Hills: r10-65, d50-100                       
+                            self.biome[x, y] = BIOME_TYPE_FOREST
+                            self.biomeColourCode[x, y] = COLOR_DARK_GREEN                            
+                    else: # all other rainfall amounts (0.66 - 1.00)
+                        if self.drainmap[x, y] < 0.33:    # Swamp: r66-100, d0-32
+                            self.biome[x, y] = BIOME_TYPE_SWAMP
+                            self.biomeColourCode[x, y] = COLOR_AMETHYST
+                        else:  # Forest: r66-100, d33-100
+                            self.biome[x, y] = BIOME_TYPE_FOREST
+                            self.biomeColourCode[x, y] = COLOR_DARK_GREEN                    
+                                        
+    def biomeType(self, biome):
+        if biome == BIOME_TYPE_WATER: 
+            result = "Water"
+        elif biome == BIOME_TYPE_GRASSLAND: 
+            result = "Grassland"
+        elif biome == BIOME_TYPE_DESERT_SAND: 
+            result = "Sandy Desert"
+        elif biome == BIOME_TYPE_DESERT_ROCK: 
+            result = "Rocky Desert"
+        elif biome == BIOME_TYPE_MOUNTAIN_LOW: 
+            result = "Low Mountain"
+        elif biome == BIOME_TYPE_MOUNTAIN_HIGH: 
+            result = "High Mountain"
+        elif biome == BIOME_TYPE_SAVANNA: 
+            result = "Savanna"
+        elif biome == BIOME_TYPE_MARSH: 
+            result = "Marsh"
+        elif biome == BIOME_TYPE_SHRUBLAND: 
+            result = "Shrubland"
+        elif biome == BIOME_TYPE_HILLS: 
+            result = "Hill"
+        elif biome == BIOME_TYPE_SWAMP: 
+            result = "Swamp"
+        elif biome == BIOME_TYPE_FOREST:
+            result = "Forest"
+        elif biome == BIOME_TYPE_DESERT_BADLANDS: 
+            result = "Badland"
+        elif biome == BIOME_TYPE_MOUNTAIN: 
+            result = "Mountain"                    
+        elif biome == BIOME_TYPE_UNDEFINED:
+            result = "Undefined"
+        else:
+            result = "No, really... Undefined"
+        return result
+
+
+if __name__ == '__main__':
+    biomes = Biomes()
+    print(biomes)
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""Create country sub-division redirect pages.
+
+Check if they are in the form Something, State, and if so, create a redirect
+from Something, ST.
+
+Specific arguments:
+-start:xxx Specify the place in the alphabet to start searching
+-force: Don't ask whether to create pages, just create them.
+
+PRE-REQUISITE : Need to install python-pycountry library.
+* Follow the instructions at: https://www.versioneye.com/python/pycountry/0.16
+* Install with pip: pip install pycountry
+"""
+#
+# (C) Andre Engels, 2004
+# (C) Pywikibot team, 2004-2018
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
+import re
+import sys
+
+import pywikibot
+
+from pywikibot import i18n
+
+try:
+    import pycountry
+except ImportError:
+    pywikibot.error('This script requires the python-pycountry module')
+    pywikibot.error('See: https://pypi.org/project/pycountry')
+    pywikibot.exception()
+    sys.exit(1)
+
+
+class StatesRedirectBot(pywikibot.Bot):
+
+    """Bot class used for implementation of re-direction norms."""
+
+    def __init__(self, start, force):
+        """Initializer.
+
+        Parameters:
+            @param start:xxx Specify the place in the alphabet to start
+            searching.
+            @param force: Don't ask whether to create pages, just create
+            them.
+        """
+        site = pywikibot.Site()
+        generator = site.allpages(start=start)
+        super(StatesRedirectBot, self).__init__(generator=generator)
+
+        self.force = force
+
+        # Created abbrev from pycountry data base
+        self.abbrev = {}
+        for subd in pycountry.subdivisions:
+            # Used subd.code[3:] to extract the exact code for
+            # subdivisional states(ignoring the country code).
+            self.abbrev[subd.name] = subd.code[3:]
+
+    def treat(self, page):
+        """Re-directing process.
+
+        Check if pages are in the given form Something, State, and
+        if so, create a redirect from Something, ST..
+        """
+        for sn in self.abbrev:
+            if re.search(r', %s$' % sn, page.title()):
+                pl = pywikibot.Page(self.site, page.title().replace(sn,
+                                    self.abbrev[sn]))
+                # A bit hacking here - the real work is done in the
+                # 'except pywikibot.NoPage' part rather than the 'try'.
+
+                try:
+                    pl.get(get_redirect=True)
+                    goal = pl.getRedirectTarget().title()
+                    if pywikibot.Page(self.site, goal).exists():
+                        pywikibot.output(
+                            u"Not creating %s - redirect already exists."
+                            % goal)
+                    else:
+                        pywikibot.warning(
+                            u"%s already exists but redirects elsewhere!"
+                            % goal)
+                except pywikibot.IsNotRedirectPage:
+                    pywikibot.warning(
+                        u"Page %s already exists and is not a redirect "
+                        u"Please check page!"
+                        % pl.title())
+                except pywikibot.NoPage:
+                    if page.isRedirectPage():
+                        p2 = page.getRedirectTarget()
+                        pywikibot.output(
+                            u'Note: goal page is redirect.\nCreating redirect '
+                            u'to "%s" to avoid double redirect.' % p2.title())
+                    else:
+                        p2 = page
+                    if self.force or pywikibot.input_yn('Create redirect {0}?'
+                                                        .format(pl.title())):
+                        pl.set_redirect_target(
+                            p2, create=True,
+                            summary=i18n.twtranslate(
+                                self.site, 'states_redirect-comment'))
+
+
+def main(*args):
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
+    local_args = pywikibot.handle_args(args)
+    start = None
+    force = False
+
+    # Parse command line arguments
+    for arg in local_args:
+        if arg.startswith('-start:'):
+            start = arg[7:]
+        elif arg == '-force':
+            force = True
+        else:
+            pywikibot.warning(
+                u'argument "%s" not understood; ignoring.' % arg)
+
+    bot = StatesRedirectBot(start, force)
+    bot.run()
+
+
+if __name__ == "__main__":
+    main()
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+from __future__ import absolute_import
+
+from collections import OrderedDict
+import zipfile
+
+from .loader import Loader
+
+
+class ZipfileLoader(Loader):
+    """Loads from a zipfile"""
+
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d.pop('_file', None)  # not pickle-able
+        return d
+
+    def _open_file(self):
+        self._file = zipfile.ZipFile(self.path)
+
+    @property
+    def file(self):
+        try:
+            return self._file
+        except AttributeError:
+            self._open_file()
+            return self._file
+
+    def _set_keys(self):
+        self._names_to_info = OrderedDict(
+            [(i.filename, i) for i in self.file.infolist()])
+        self._keys = list(self._names_to_info.keys())
+
+    def get(self, key):
+        info = self._names_to_info[key]
+        with self._lock:
+            try:
+                return self.file.read(info)
+            except zipfile.BadZipFile:
+                # Try re-opening the file
+                self._open_file()
+                return self.file.read(info)
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+"""
+Django settings for bikeshop project.
+
+Generated by 'django-admin startproject' using Django 1.9.4.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/1.9/topics/settings/
+
+For the full list of settings and their values, see
+https://docs.djangoproject.com/en/1.9/ref/settings/
+"""
+
+import os
+
+# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# Quick-start development settings - unsuitable for production
+# See https://docs.djangoproject.com/en/1.9/howto/deployment/checklist/
+
+
+# Application definition
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'haystack',
+    'webpack_loader',
+    'compressor',
+    'rest_framework',
+    'channels',
+    'django_fsm',
+
+    'registration',
+    'core',
+    'bike',
+]
+
+MIDDLEWARE_CLASSES = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.SessionAuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'bikeshop.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'bikeshop.wsgi.application'
+
+
+# Database
+# https://docs.djangoproject.com/en/1.9/ref/settings/#databases
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'postgres',
+        'USER': 'postgres',
+        'HOST': 'db',
+        'PORT': '5432',
+        'PASSWORD': 'password'
+    }
+}
+
+
+# Password validation
+# https://docs.djangoproject.com/en/1.9/ref/settings/#auth-password-validators
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+    },
+]
+
+
+# Internationalization
+# https://docs.djangoproject.com/en/1.9/topics/i18n/
+
+LANGUAGE_CODE = 'en-us'
+
+TIME_ZONE = 'UTC'
+
+USE_I18N = True
+
+USE_L10N = True
+
+USE_TZ = True
+
+
+# Static files (CSS, JavaScript, Images)
+# https://docs.djangoproject.com/en/1.9/howto/static-files/
+
+STATICFILES_FINDERS = (
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+    'compressor.finders.CompressorFinder',
+)
+STATICFILES_DIRS = [
+    ('vendor', os.path.join(BASE_DIR, '../vendor')),
+    os.path.join(BASE_DIR, '../assets')
+]
+
+STATIC_ROOT = 'static'
+STATIC_URL = '/static/'
+
+AUTH_USER_MODEL = 'registration.CustomUser'
+
+COMPRESS_PRECOMPILERS = (
+    ('text/x-scss', 'django_libsass.SassCompiler'),
+)
+
+WEBPACK_LOADER = {
+    'DEFAULT': {
+        'CACHE': False,
+        'BUNDLE_DIR_NAME': 'bundles/',  # must end with slash
+        'STATS_FILE': os.path.join(BASE_DIR, '../webpack-stats.json'),
+        'POLL_INTERVAL': 0.1,
+        'IGNORE': ['.+\.hot-update.js', '.+\.map']
+    }
+}
+
+HAYSTACK_CONNECTIONS = {
+    'default': {
+        'ENGINE': 'haystack.backends.whoosh_backend.WhooshEngine',
+        'PATH': os.path.join(os.path.dirname(__file__), 'whoosh_index'),
+    },
+}
+
+HAYSTACK_SIGNAL_PROCESSOR = 'haystack.signals.RealtimeSignalProcessor'
+
+LOGIN_REDIRECT_URL = 'home'
+LOGIN_URL = 'login'
+
+REST_FRAMEWORK = {
+    # Use Django's standard `django.contrib.auth` permissions,
+    # or allow read-only access for unauthenticated users.
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated'
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+            'rest_framework.authentication.SessionAuthentication',
+            'rest_framework.authentication.BasicAuthentication',
+            'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+        ),
+}
+
+DATE_INPUT_FORMATS = ['iso-8601']
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "asgi_redis.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ.get('REDIS_URL', 'redis://redis:6379')],
+        },
+        "ROUTING": "bike.routing.channel_routing",
+    },
+}
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+from unittest import mock
+
+from django.core.exceptions import ValidationError
+
+from rest_framework.reverse import reverse
+
+import pytest
+
+from know_me import models
+
+
+def test_create(user_factory):
+    """
+    Test creating a km_user.
+    """
+    km_user = models.KMUser.objects.create(
+        quote='Life is like a box of chocolates.',
+        user=user_factory())
+
+    assert not km_user.is_legacy_user
+
+
+def test_get_absolute_url(km_user_factory):
+    """
+    This method should return the URL of the km_user's detail view.
+    """
+    km_user = km_user_factory()
+    expected = reverse('know-me:km-user-detail', kwargs={'pk': km_user.pk})
+
+    assert km_user.get_absolute_url() == expected
+
+
+def test_get_media_resource_category_list_url(km_user_factory):
+    """
+    This method should return the URL of the Know Me user's media
+    resource category list view.
+    """
+    km_user = km_user_factory()
+    expected = reverse(
+        'know-me:profile:media-resource-category-list',
+        kwargs={'pk': km_user.pk})
+
+    assert km_user.get_media_resource_category_list_url() == expected
+
+
+def test_get_media_resource_category_list_url_request(api_rf, km_user_factory):
+    """
+    If given a request as context, the method should return the full URI
+    if the Know Me user's media resource category list view.
+    """
+    km_user = km_user_factory()
+    request = api_rf.get(km_user.get_media_resource_category_list_url())
+    expected = request.build_absolute_uri()
+
+    assert km_user.get_media_resource_category_list_url(request) == expected
+
+
+def test_get_media_resource_list_url(km_user_factory):
+    """
+    This method should return the absolute URL of the Know Me user's
+    media resource list view.
+    """
+    km_user = km_user_factory()
+    expected = reverse(
+        'know-me:profile:media-resource-list',
+        kwargs={'pk': km_user.pk})
+
+    assert km_user.get_media_resource_list_url() == expected
+
+
+def test_get_profile_list_url(km_user_factory):
+    """
+    This method should return the URL of the Know Me user's profile list
+    view.
+    """
+    km_user = km_user_factory()
+    expected = reverse(
+        'know-me:profile:profile-list',
+        kwargs={'pk': km_user.pk})
+
+    assert km_user.get_profile_list_url() == expected
+
+
+def test_get_profile_list_url_request(api_rf, km_user_factory):
+    """
+    If given a request as context, the method should return the full URI
+    of the Know Me user's profile list view.
+    """
+    km_user = km_user_factory()
+    request = api_rf.get(km_user.get_profile_list_url())
+    expected = request.build_absolute_uri()
+
+    assert km_user.get_profile_list_url(request) == expected
+
+
+def test_has_object_read_permission_other(
+        api_rf,
+        km_user_factory,
+        user_factory):
+    """
+    Other users should not have read permissions on km_users they don't
+    own.
+    """
+    km_user = km_user_factory()
+
+    api_rf.user = user_factory()
+    request = api_rf.get('/')
+
+    assert not km_user.has_object_read_permission(request)
+
+
+def test_has_object_read_permission_shared(
+        api_rf,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    The requesting user should be granted read access if there is an
+    accessor granting them access.
+    """
+    km_user = km_user_factory()
+    accessor = km_user_accessor_factory(is_accepted=True, km_user=km_user)
+
+    api_rf.user = accessor.user_with_access
+    request = api_rf.get('/')
+
+    assert km_user.has_object_read_permission(request)
+
+
+def test_has_object_read_permission_shared_not_accepted(
+        api_rf,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    If the accessor granting access has not been accepted yet, access
+    should not be granted.
+    """
+    km_user = km_user_factory()
+    accessor = km_user_accessor_factory(is_accepted=False, km_user=km_user)
+
+    api_rf.user = accessor.user_with_access
+    request = api_rf.get('/')
+
+    assert not km_user.has_object_read_permission(request)
+
+
+def test_has_object_read_permission_owner(api_rf, km_user_factory):
+    """
+    Users should have read access on their own km_user.
+    """
+    km_user = km_user_factory()
+
+    api_rf.user = km_user.user
+    request = api_rf.get('/')
+
+    assert km_user.has_object_read_permission(request)
+
+
+def test_has_object_write_permission_other(
+        api_rf,
+        km_user_factory,
+        user_factory):
+    """
+    Other users should not have write permissions on km_users they don't
+    own.
+    """
+    km_user = km_user_factory()
+
+    api_rf.user = user_factory()
+    request = api_rf.get('/')
+
+    assert not km_user.has_object_write_permission(request)
+
+
+def test_has_object_write_permission_owner(api_rf, km_user_factory):
+    """
+    Users should have write access on their own km_user.
+    """
+    km_user = km_user_factory()
+
+    api_rf.user = km_user.user
+    request = api_rf.get('/')
+
+    assert km_user.has_object_write_permission(request)
+
+
+def test_has_object_write_permission_shared(
+        api_rf,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    Users should be able to be granted write access through an accessor.
+    """
+    km_user = km_user_factory()
+    accessor = km_user_accessor_factory(
+        is_accepted=True,
+        is_admin=True,
+        km_user=km_user)
+
+    api_rf.user = accessor.user_with_access
+    request = api_rf.get('/')
+
+    assert km_user.has_object_write_permission(request)
+
+
+def test_has_object_write_permission_shared_no_write(
+        api_rf,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    Write access should not be granted from accessors that only grant
+    read access.
+    """
+    km_user = km_user_factory()
+    accessor = km_user_accessor_factory(
+        is_accepted=True,
+        is_admin=False,
+        km_user=km_user)
+
+    api_rf.user = accessor.user_with_access
+    request = api_rf.get('/')
+
+    assert not km_user.has_object_write_permission(request)
+
+
+def test_has_object_write_permission_shared_not_accepted(
+        api_rf,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    If the accessor has not been accepted, it should not grant write
+    access.
+    """
+    km_user = km_user_factory()
+    accessor = km_user_accessor_factory(
+        is_accepted=False,
+        is_admin=True,
+        km_user=km_user)
+
+    api_rf.user = accessor.user_with_access
+    request = api_rf.get('/')
+
+    assert not km_user.has_object_write_permission(request)
+
+
+def test_name(km_user_factory):
+    """
+    The know me user's name property should return the associated user's
+    short name.
+    """
+    km_user = km_user_factory()
+
+    assert km_user.name == km_user.user.get_short_name()
+
+
+def test_share_duplicate_email(
+        email_factory,
+        km_user_accessor_factory,
+        km_user_factory):
+    """
+    If there is already an accessor linking the provided email and Know
+    Me user, a validation error should be raised.
+    """
+    km_user = km_user_factory()
+    email = email_factory()
+    km_user_accessor_factory(email=email.email, km_user=km_user)
+
+    with pytest.raises(ValidationError):
+        km_user.share(email.email)
+
+
+@mock.patch('know_me.models.KMUserAccessor.send_invite')
+def test_share_existing_user(
+        mock_send_invite,
+        email_factory,
+        km_user_factory,
+        user_factory):
+    """
+    If the provided email address belongs to an existing user, an
+    accessor should be created for that user.
+    """
+    km_user = km_user_factory()
+
+    user = user_factory()
+
+    accessor = km_user.share(
+        user.primary_email.email,
+        is_admin=True)
+
+    assert km_user.km_user_accessors.count() == 1
+
+    assert accessor.email == user.primary_email.email
+    assert accessor.is_admin
+    assert mock_send_invite.call_count == 1
+
+
+@mock.patch('know_me.models.KMUserAccessor.send_invite')
+def test_share_existing_user_unverified_email(
+        mock_send_invite,
+        email_factory,
+        km_user_factory,
+        user_factory):
+    """
+    If the provided email address exists but isn't verified, the
+    accessor should not be assigned a user yet.
+    """
+    km_user = km_user_factory()
+
+    user = user_factory()
+    email = email_factory(is_verified=False, user=user)
+
+    accessor = km_user.share(email.email)
+
+    assert km_user.km_user_accessors.count() == 1
+
+    assert accessor.email == email.email
+    assert accessor.user_with_access is None
+    assert mock_send_invite.call_count == 1
+
+
+def test_share_multiple_emails(
+        email_factory,
+        km_user_accessor_factory,
+        km_user_factory,
+        user_factory):
+    """
+    If a user has already been granted access through another email that
+    they own, they should not be able to be granted access through
+    another email address that they own.
+    """
+    user = user_factory()
+    e1 = email_factory(is_verified=True, user=user)
+    e2 = email_factory(is_verified=True, user=user)
+
+    km_user = km_user_factory()
+    km_user_accessor_factory(email=e1, km_user=km_user, user_with_access=user)
+
+    with pytest.raises(ValidationError):
+        km_user.share(e2.email)
+
+
+@mock.patch('know_me.models.KMUserAccessor.send_invite')
+def test_share_nonexistent_user(mock_send_invite, km_user_factory):
+    """
+    If there is no user with the provided email address, The created
+    accessor should only be linked to an email address.
+    """
+    km_user = km_user_factory()
+    email = 'test-share@example.com'
+
+    accessor = km_user.share(email)
+
+    assert km_user.km_user_accessors.count() == 1
+
+    assert accessor.email == email
+    assert accessor.user_with_access is None
+    assert mock_send_invite.call_count == 1
+
+
+def test_share_self(km_user_factory):
+    """
+    You should not be able to share your own Know Me user with yourself.
+
+    Regression test for #343.
+    """
+    km_user = km_user_factory()
+    email = km_user.user.primary_email
+
+    with pytest.raises(ValidationError):
+        km_user.share(email.email)
+
+
+def test_string_conversion(km_user_factory):
+    """
+    Converting a km_user to a string should return the km_user's name.
+    """
+    km_user = km_user_factory()
+
+    assert str(km_user) == km_user.name
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+import functools
+import hashlib
+import random
+import string
+from collections import OrderedDict
+
+import flask
+
+
+def sha1_hash(input_bytes):
+    """ Hash given bytes with hashlib.sha1 and return the digest (as bytes) """
+    return hashlib.sha1(input_bytes).digest()
+
+
+def sorted_pathdict(input_dict):
+    """ Sorts a parsed torrent filelist dict by alphabat, directories first """
+    directories = OrderedDict()
+    files = OrderedDict()
+
+    for key, value in input_dict.items():
+        if isinstance(value, dict):
+            directories[key] = sorted_pathdict(value)
+        else:
+            files[key] = value
+
+    return OrderedDict(sorted(directories.items()) + sorted(files.items()))
+
+
+def random_string(length, charset=None):
+    if charset is None:
+        charset = string.ascii_letters + string.digits
+    return ''.join(random.choice(charset) for i in range(length))
+
+
+def cached_function(f):
+    sentinel = object()
+    f._cached_value = sentinel
+
+    @functools.wraps(f)
+    def decorator(*args, **kwargs):
+        if f._cached_value is sentinel:
+            f._cached_value = f(*args, **kwargs)
+        return f._cached_value
+    return decorator
+
+
+def flatten_dict(d, result=None):
+    if result is None:
+        result = {}
+    for key in d:
+        value = d[key]
+        if isinstance(value, dict):
+            value1 = {}
+            for keyIn in value:
+                value1["/".join([key, keyIn])] = value[keyIn]
+            flatten_dict(value1, result)
+        elif isinstance(value, (list, tuple)):
+            for indexB, element in enumerate(value):
+                if isinstance(element, dict):
+                    value1 = {}
+                    index = 0
+                    for keyIn in element:
+                        newkey = "/".join([key, keyIn])
+                        value1[newkey] = value[indexB][keyIn]
+                        index += 1
+                    for keyA in value1:
+                        flatten_dict(value1, result)
+        else:
+            result[key] = value
+    return result
+
+
+def chain_get(source, *args):
+    ''' Tries to return values from source by the given keys.
+        Returns None if none match.
+        Note: can return a None from the source. '''
+    sentinel = object()
+    for key in args:
+        value = source.get(key, sentinel)
+        if value is not sentinel:
+            return value
+    return None
+
+
+def admin_only(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if flask.g.user and flask.g.user.is_superadmin:
+            return f(*args, **kwargs)
+        else:
+            flask.abort(401)
+    return wrapper
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+from sympy import Derivative
+from sympy.core.function import UndefinedFunction
+from sympy.core.symbol import Symbol
+from sympy.interactive.printing import init_printing
+from sympy.printing.conventions import split_super_sub
+from sympy.printing.latex import LatexPrinter, translate
+from sympy.printing.pretty.pretty import PrettyPrinter
+from sympy.printing.str import StrPrinter
+
+__all__ = ['vprint', 'vsstrrepr', 'vsprint', 'vpprint', 'vlatex',
+           'init_vprinting']
+
+
+class VectorStrPrinter(StrPrinter):
+    """String Printer for vector expressions. """
+
+    def _print_Derivative(self, e):
+        from sympy.physics.vector.functions import dynamicsymbols
+        t = dynamicsymbols._t
+        if (bool(sum([i == t for i in e.variables])) &
+                isinstance(type(e.args[0]), UndefinedFunction)):
+            ol = str(e.args[0].func)
+            for i, v in enumerate(e.variables):
+                ol += dynamicsymbols._str
+            return ol
+        else:
+            return StrPrinter().doprint(e)
+
+    def _print_Function(self, e):
+        from sympy.physics.vector.functions import dynamicsymbols
+        t = dynamicsymbols._t
+        if isinstance(type(e), UndefinedFunction):
+            return StrPrinter().doprint(e).replace("(%s)" % t, '')
+        return e.func.__name__ + "(%s)" % self.stringify(e.args, ", ")
+
+
+class VectorStrReprPrinter(VectorStrPrinter):
+    """String repr printer for vector expressions."""
+    def _print_str(self, s):
+        return repr(s)
+
+
+class VectorLatexPrinter(LatexPrinter):
+    """Latex Printer for vector expressions. """
+
+    def _print_Function(self, expr, exp=None):
+        from sympy.physics.vector.functions import dynamicsymbols
+        func = expr.func.__name__
+        t = dynamicsymbols._t
+
+        if hasattr(self, '_print_' + func):
+            return getattr(self, '_print_' + func)(expr, exp)
+        elif isinstance(type(expr), UndefinedFunction) and (expr.args == (t,)):
+
+            name, supers, subs = split_super_sub(func)
+            name = translate(name)
+            supers = [translate(sup) for sup in supers]
+            subs = [translate(sub) for sub in subs]
+
+            if len(supers) != 0:
+                supers = r"^{%s}" % "".join(supers)
+            else:
+                supers = r""
+
+            if len(subs) != 0:
+                subs = r"_{%s}" % "".join(subs)
+            else:
+                subs = r""
+
+            if exp:
+                supers += r"^{%s}" % self._print(exp)
+
+            return r"%s" % (name + supers + subs)
+        else:
+            args = [str(self._print(arg)) for arg in expr.args]
+            # How inverse trig functions should be displayed, formats are:
+            # abbreviated: asin, full: arcsin, power: sin^-1
+            inv_trig_style = self._settings['inv_trig_style']
+            # If we are dealing with a power-style inverse trig function
+            inv_trig_power_case = False
+            # If it is applicable to fold the argument brackets
+            can_fold_brackets = self._settings['fold_func_brackets'] and \
+                len(args) == 1 and \
+                not self._needs_function_brackets(expr.args[0])
+
+            inv_trig_table = ["asin", "acos", "atan", "acot"]
+
+            # If the function is an inverse trig function, handle the style
+            if func in inv_trig_table:
+                if inv_trig_style == "abbreviated":
+                    func = func
+                elif inv_trig_style == "full":
+                    func = "arc" + func[1:]
+                elif inv_trig_style == "power":
+                    func = func[1:]
+                    inv_trig_power_case = True
+
+                    # Can never fold brackets if we're raised to a power
+                    if exp is not None:
+                        can_fold_brackets = False
+
+            if inv_trig_power_case:
+                name = r"\operatorname{%s}^{-1}" % func
+            elif exp is not None:
+                name = r"\operatorname{%s}^{%s}" % (func, exp)
+            else:
+                name = r"\operatorname{%s}" % func
+
+            if can_fold_brackets:
+                name += r"%s"
+            else:
+                name += r"\left(%s\right)"
+
+            if inv_trig_power_case and exp is not None:
+                name += r"^{%s}" % exp
+
+            return name % ",".join(args)
+
+    def _print_Derivative(self, der_expr):
+        from sympy.physics.vector.functions import dynamicsymbols
+        # make sure it is an the right form
+        der_expr = der_expr.doit()
+        if not isinstance(der_expr, Derivative):
+            return self.doprint(der_expr)
+
+        # check if expr is a dynamicsymbol
+        from sympy.core.function import AppliedUndef
+        t = dynamicsymbols._t
+        expr = der_expr.expr
+        red = expr.atoms(AppliedUndef)
+        syms = der_expr.variables
+        test1 = not all([True for i in red if i.free_symbols == {t}])
+        test2 = not all([(t == i) for i in syms])
+        if test1 or test2:
+            return LatexPrinter().doprint(der_expr)
+
+        # done checking
+        dots = len(syms)
+        base = self._print_Function(expr)
+        base_split = base.split('_', 1)
+        base = base_split[0]
+        if dots == 1:
+            base = r"\dot{%s}" % base
+        elif dots == 2:
+            base = r"\ddot{%s}" % base
+        elif dots == 3:
+            base = r"\dddot{%s}" % base
+        if len(base_split) is not 1:
+            base += '_' + base_split[1]
+        return base
+
+    def parenthesize(self, item, level, strict=False):
+        item_latex = self._print(item)
+        if item_latex.startswith(r"\dot") or item_latex.startswith(r"\ddot") or item_latex.startswith(r"\dddot"):
+            return self._print(item)
+        else:
+            return LatexPrinter.parenthesize(self, item, level, strict)
+
+
+class VectorPrettyPrinter(PrettyPrinter):
+    """Pretty Printer for vectorialexpressions. """
+
+    def _print_Derivative(self, deriv):
+        from sympy.physics.vector.functions import dynamicsymbols
+        # XXX use U('PARTIAL DIFFERENTIAL') here ?
+        t = dynamicsymbols._t
+        dot_i = 0
+        can_break = True
+        syms = list(reversed(deriv.variables))
+        x = None
+
+        while len(syms) > 0:
+            if syms[-1] == t:
+                syms.pop()
+                dot_i += 1
+            else:
+                return super(VectorPrettyPrinter, self)._print_Derivative(deriv)
+
+        if not (isinstance(type(deriv.expr), UndefinedFunction)
+                and (deriv.expr.args == (t,))):
+                return super(VectorPrettyPrinter, self)._print_Derivative(deriv)
+        else:
+            pform = self._print_Function(deriv.expr)
+        # the following condition would happen with some sort of non-standard
+        # dynamic symbol I guess, so we'll just print the SymPy way
+        if len(pform.picture) > 1:
+            return super(VectorPrettyPrinter, self)._print_Derivative(deriv)
+
+        dots = {0 : u"",
+                1 : u"\N{COMBINING DOT ABOVE}",
+                2 : u"\N{COMBINING DIAERESIS}",
+                3 : u"\N{COMBINING THREE DOTS ABOVE}",
+                4 : u"\N{COMBINING FOUR DOTS ABOVE}"}
+
+        d = pform.__dict__
+        pic = d['picture'][0]
+        uni = d['unicode']
+        lp = len(pic) // 2 + 1
+        lu = len(uni) // 2 + 1
+        pic_split = [pic[:lp], pic[lp:]]
+        uni_split = [uni[:lu], uni[lu:]]
+
+        d['picture'] = [pic_split[0] + dots[dot_i] + pic_split[1]]
+        d['unicode'] =  uni_split[0] + dots[dot_i] + uni_split[1]
+
+        return pform
+
+    def _print_Function(self, e):
+        from sympy.physics.vector.functions import dynamicsymbols
+        t = dynamicsymbols._t
+        # XXX works only for applied functions
+        func = e.func
+        args = e.args
+        func_name = func.__name__
+        pform = self._print_Symbol(Symbol(func_name))
+        # If this function is an Undefined function of t, it is probably a
+        # dynamic symbol, so we'll skip the (t). The rest of the code is
+        # identical to the normal PrettyPrinter code
+        if not (isinstance(func, UndefinedFunction) and (args == (t,))):
+            return super(VectorPrettyPrinter, self)._print_Function(e)
+        return pform
+
+
+def vprint(expr, **settings):
+    r"""Function for printing of expressions generated in the
+    sympy.physics vector package.
+
+    Extends SymPy's StrPrinter, takes the same setting accepted by SymPy's
+    `sstr()`, and is equivalent to `print(sstr(foo))`.
+
+    Parameters
+    ==========
+
+    expr : valid SymPy object
+        SymPy expression to print.
+    settings : args
+        Same as the settings accepted by SymPy's sstr().
+
+    Examples
+    ========
+
+    >>> from sympy.physics.vector import vprint, dynamicsymbols
+    >>> u1 = dynamicsymbols('u1')
+    >>> print(u1)
+    u1(t)
+    >>> vprint(u1)
+    u1
+
+    """
+
+    outstr = vsprint(expr, **settings)
+
+    from sympy.core.compatibility import builtins
+    if (outstr != 'None'):
+        builtins._ = outstr
+        print(outstr)
+
+
+def vsstrrepr(expr, **settings):
+    """Function for displaying expression representation's with vector
+    printing enabled.
+
+    Parameters
+    ==========
+
+    expr : valid SymPy object
+        SymPy expression to print.
+    settings : args
+        Same as the settings accepted by SymPy's sstrrepr().
+
+    """
+    p = VectorStrReprPrinter(settings)
+    return p.doprint(expr)
+
+
+def vsprint(expr, **settings):
+    r"""Function for displaying expressions generated in the
+    sympy.physics vector package.
+
+    Returns the output of vprint() as a string.
+
+    Parameters
+    ==========
+
+    expr : valid SymPy object
+        SymPy expression to print
+    settings : args
+        Same as the settings accepted by SymPy's sstr().
+
+    Examples
+    ========
+
+    >>> from sympy.physics.vector import vsprint, dynamicsymbols
+    >>> u1, u2 = dynamicsymbols('u1 u2')
+    >>> u2d = dynamicsymbols('u2', level=1)
+    >>> print("%s = %s" % (u1, u2 + u2d))
+    u1(t) = u2(t) + Derivative(u2(t), t)
+    >>> print("%s = %s" % (vsprint(u1), vsprint(u2 + u2d)))
+    u1 = u2 + u2'
+
+    """
+
+    string_printer = VectorStrPrinter(settings)
+    return string_printer.doprint(expr)
+
+
+def vpprint(expr, **settings):
+    r"""Function for pretty printing of expressions generated in the
+    sympy.physics vector package.
+
+    Mainly used for expressions not inside a vector; the output of running
+    scripts and generating equations of motion. Takes the same options as
+    SymPy's pretty_print(); see that function for more information.
+
+    Parameters
+    ==========
+
+    expr : valid SymPy object
+        SymPy expression to pretty print
+    settings : args
+        Same as those accepted by SymPy's pretty_print.
+
+
+    """
+
+    pp = VectorPrettyPrinter(settings)
+
+    # Note that this is copied from sympy.printing.pretty.pretty_print:
+
+    # XXX: this is an ugly hack, but at least it works
+    use_unicode = pp._settings['use_unicode']
+    from sympy.printing.pretty.pretty_symbology import pretty_use_unicode
+    uflag = pretty_use_unicode(use_unicode)
+
+    try:
+        return pp.doprint(expr)
+    finally:
+        pretty_use_unicode(uflag)
+
+
+def vlatex(expr, **settings):
+    r"""Function for printing latex representation of sympy.physics.vector
+    objects.
+
+    For latex representation of Vectors, Dyadics, and dynamicsymbols. Takes the
+    same options as SymPy's latex(); see that function for more information;
+
+    Parameters
+    ==========
+
+    expr : valid SymPy object
+        SymPy expression to represent in LaTeX form
+    settings : args
+        Same as latex()
+
+    Examples
+    ========
+
+    >>> from sympy.physics.vector import vlatex, ReferenceFrame, dynamicsymbols
+    >>> N = ReferenceFrame('N')
+    >>> q1, q2 = dynamicsymbols('q1 q2')
+    >>> q1d, q2d = dynamicsymbols('q1 q2', 1)
+    >>> q1dd, q2dd = dynamicsymbols('q1 q2', 2)
+    >>> vlatex(N.x + N.y)
+    '\\mathbf{\\hat{n}_x} + \\mathbf{\\hat{n}_y}'
+    >>> vlatex(q1 + q2)
+    'q_{1} + q_{2}'
+    >>> vlatex(q1d)
+    '\\dot{q}_{1}'
+    >>> vlatex(q1 * q2d)
+    'q_{1} \\dot{q}_{2}'
+    >>> vlatex(q1dd * q1 / q1d)
+    '\\frac{q_{1} \\ddot{q}_{1}}{\\dot{q}_{1}}'
+
+    """
+    latex_printer = VectorLatexPrinter(settings)
+
+    return latex_printer.doprint(expr)
+
+
+def init_vprinting(**kwargs):
+    """Initializes time derivative printing for all SymPy objects, i.e. any
+    functions of time will be displayed in a more compact notation. The main
+    benefit of this is for printing of time derivatives; instead of
+    displaying as ``Derivative(f(t),t)``, it will display ``f'``. This is
+    only actually needed for when derivatives are present and are not in a
+    physics.vector.Vector or physics.vector.Dyadic object. This function is a
+    light wrapper to `sympy.interactive.init_printing`. Any keyword
+    arguments for it are valid here.
+
+    {0}
+
+    Examples
+    ========
+
+    >>> from sympy import Function, symbols
+    >>> from sympy.physics.vector import init_vprinting
+    >>> t, x = symbols('t, x')
+    >>> omega = Function('omega')
+    >>> omega(x).diff()
+    Derivative(omega(x), x)
+    >>> omega(t).diff()
+    Derivative(omega(t), t)
+
+    Now use the string printer:
+
+    >>> init_vprinting(pretty_print=False)
+    >>> omega(x).diff()
+    Derivative(omega(x), x)
+    >>> omega(t).diff()
+    omega'
+
+    """
+    kwargs['str_printer'] = vsstrrepr
+    kwargs['pretty_printer'] = vpprint
+    kwargs['latex_printer'] = vlatex
+    init_printing(**kwargs)
+
+params = init_printing.__doc__.split('Examples\n    ========')[0]
+init_vprinting.__doc__ = init_vprinting.__doc__.format(params)
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+import os
+
+from time import sleep
+from sys import stderr
+import xml.etree.ElementTree as eT
+from ansible.module_utils.basic import AnsibleModule
+
+from bkr.client import BeakerCommand
+from bkr.common.hub import HubProxy
+from bkr.common.pyconfig import PyConfigParser
+
+
+BEAKER_CONF = os.environ.get('BEAKER_CONF', '/etc/beaker/client.conf')
+
+
+def _jprefix(job_ids):
+    return ["J:" + _id for _id in job_ids]
+
+
+class BeakerTargets(object):
+    def __init__(self, params, logger=None):
+        # params from AnsibleModule argument_spec below
+        self.ids = params['ids']
+        provision_params = params['provision_params']
+
+        # Set wait methods from provision params, with reasonable defaults
+        self.wait_time = provision_params.get('attempt_wait_time', 60)
+        self.max_attempts = provision_params.get('max_attempts', 60)
+
+        # set up beaker connection
+        self.conf = PyConfigParser()
+        default_config = os.path.expanduser(BEAKER_CONF)
+        self.conf.load_from_file(default_config)
+        self.hub = HubProxy(logger=logger, conf=self.conf)
+
+    def get_system_statuses(self):
+        """
+        Checks on the status of a set of Beaker jobs (ids) and returns their
+        hostname once the jobs have reached their defined status.
+        """
+        attempts = 0
+        while attempts < self.max_attempts:
+            job_results, all_count = self._check_jobs()
+            pass_count = 0
+            for resource in job_results:
+                result = resource['result']
+                status = resource['status']
+                print >> stderr, "status: %s, result: %s" % (status, result)
+                if status not in ['Cancelled', 'Aborted']:
+                    if result == 'Pass':
+                        pass_count += 1
+                    elif result in ['Fail', 'Warn', 'Panic', 'Completed']:
+                        raise Exception("System failed with state"
+                                        " '{0}'".format(result))
+                elif status == 'Aborted':
+                    raise Exception("System aborted")
+                elif status == 'Cancelled':
+                    raise Exception("System canceled")
+            attempts += 1
+            if pass_count == all_count:
+                return job_results
+            sleep(self.wait_time)
+
+        # max attempts exceeded, cancel jobs and fail
+        for job_id in _jprefix(self.ids):
+            self.hub.taskactions.stop(job_id, 'cancel',
+                                      'Provision request timed out')
+        # Fail with error msg, include results from last attempt to include
+        # in topology outputs even if provisioning failed so a destroy still
+        # cancels jobs
+        msg = ("{0} system(s) never completed in {1} polling attempts, jobs "
+               "have been cancelled: {2}".format(
+                   all_count - pass_count, attempts, ', '.join(self.ids)))
+        raise Exception(msg, job_results)
+
+    def _check_jobs(self):
+        """
+            Get state of a job in Beaker
+        """
+        jobs = _jprefix(self.ids)
+        resources = []
+        bkrcmd = BeakerCommand('BeakerCommand')
+        bkrcmd.check_taskspec_args(jobs)
+        for task in jobs:
+            myxml = self.hub.taskactions.to_xml(task)
+            myxml = myxml.encode('utf8')
+            root = eT.fromstring(myxml)
+            # Using getiterator() since its backward compatible with py26
+            for recipe in root.getiterator('recipe'):
+                resources.append({'family': recipe.get('family'),
+                                  'distro': recipe.get('distro'),
+                                  'arch': recipe.get('arch'),
+                                  'variant': recipe.get('variant'),
+                                  'system': recipe.get('system'),
+                                  'status': recipe.get('status'),
+                                  'result': recipe.get('result'),
+                                  'id': recipe.get('job_id')})
+        return resources, len(resources)
+
+
+def main():
+    mod = AnsibleModule(argument_spec={
+        'ids': {'type': 'dict'},
+        'provision_params': {'type': 'dict'},
+    })
+    beaker = BeakerTargets(mod.params)
+    try:
+        if len(beaker.ids) > 1:
+            mod.warn('When using multiple resource_definitions for beaker '
+                     'resources, only the provisioning parameters '
+                     '(max_attempts, attempt_wait_time) from the first '
+                     'resource_definition will be used. Consider using a '
+                     'single resource_definition with multiple recipes or '
+                     'recipesets instead.')
+        results = beaker.get_system_statuses()
+        mod.exit_json(hosts=results, changed=True)
+    except Exception as ex:
+        msg = ": For more details please check jobs on beaker"
+        msg = str(ex) + msg
+        mod.fail_json(msg=msg, changed=True)
+
+
+# import module snippets
+main()
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+import pytest
+import sqlalchemy as sa
+from sqlalchemy.ext.declarative import declarative_base
+
+
+Model = declarative_base()
+
+
+class Role(Model):
+
+    __tablename__ = 'role'
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    name = sa.Column(sa.String)
+
+
+class User(Model):
+
+    __tablename__ = 'user'
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    login = sa.Column(sa.String)
+    name = sa.Column(sa.String)
+    password = sa.Column(sa.String)
+    role_id = sa.Column(sa.ForeignKey(Role.id))
+
+    role = sa.orm.relationship(Role)
+
+
+@pytest.fixture(scope='session')
+def sa_engine():
+    from sqlalchemy import create_engine
+    return create_engine('sqlite:///:memory:', echo=True)
+
+
+@pytest.fixture(scope='session')
+def sa_session(sa_engine):
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker()
+    Session.configure(bind=sa_engine)
+    return Session()
+
+
+@pytest.fixture(scope='session', autouse=True)
+def migrate(sa_engine):
+    Model.metadata.create_all(sa_engine)
+
+
+def test_resource(app, api, client, sa_session):
+    from flask_restler.sqlalchemy import ModelResource, Filter
+
+    @api.route
+    class UserResouce(ModelResource):
+
+        methods = 'get', 'post', 'put', 'delete'
+
+        class Meta:
+            model = User
+            session = lambda: sa_session  # noqa
+            filters = 'login', 'name', Filter('role', mfield=Role.name)
+            schema_exclude = 'password',
+            sorting = 'login', User.name
+
+        def get_many(self, **kwargs):
+            """Join on Role for roles filters."""
+            return sa_session.query(User).outerjoin(User.role)
+
+    role = Role(name='test')
+    sa_session.add(role)
+    sa_session.commit()
+
+    response = client.get('/api/v1/user')
+    assert not response.json
+
+    response = client.post_json('/api/v1/user', {
+        'login': 'mike',
+        'name': 'Mike Bacon',
+    })
+    assert 'password' not in response.json
+    assert response.json
+
+    response = client.put_json('/api/v1/user/1', {
+        'name': 'Aaron Summer',
+    })
+    assert response.json['name'] == 'Aaron Summer'
+
+    response = client.post_json('/api/v1/user', {
+        'login': 'dave',
+        'name': 'Dave Macaroff',
+        'role': role.id,
+    })
+
+    response = client.get('/api/v1/user')
+    assert len(response.json) == 2
+
+    response = client.get('/api/v1/user?sort=login,unknown')
+    assert response.json[0]['login'] == 'dave'
+
+    response = client.get('/api/v1/user?sort=name,login')
+    assert response.json[0]['login'] == 'mike'
+
+    response = client.get('/api/v1/user?sort=-login')
+    assert response.json[0]['login'] == 'mike'
+
+    response = client.get('/api/v1/user?where={"login": "dave"}')
+    assert len(response.json) == 1
+    assert response.json[0]['login'] == 'dave'
+
+    response = client.get('/api/v1/user?where={"login": {"$like": "da%"}}')
+    assert len(response.json) == 1
+    assert response.json[0]['login'] == 'dave'
+
+    response = client.delete('/api/v1/user/1')
+    assert not response.json
+
+    response = client.get('/api/v1/user')
+    assert len(response.json) == 1
+
+    response = client.get('/api/v1/user?where={"role": "test"}')
+    assert len(response.json) == 1
+
+    response = client.get('/api/v1/user?where={"role": "unknown"}')
+    assert not response.json
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+# Copyright 2017 The TensorFlow Authors All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+"""Utility functions for blocks."""
+
+from __future__ import division
+from __future__ import unicode_literals
+
+import math
+
+import numpy as np
+import six
+import tensorflow as tf
+
+
+class RsqrtInitializer(object):
+  """Gaussian initializer with standard deviation 1/sqrt(n).
+
+  Note that tf.truncated_normal is used internally. Therefore any random sample
+  outside two-sigma will be discarded and re-sampled.
+  """
+
+  def __init__(self, dims=(0,), **kwargs):
+    """Creates an initializer.
+
+    Args:
+      dims: Dimension(s) index to compute standard deviation:
+        1.0 / sqrt(product(shape[dims]))
+      **kwargs: Extra keyword arguments to pass to tf.truncated_normal.
+    """
+    if isinstance(dims, six.integer_types):
+      self._dims = [dims]
+    else:
+      self._dims = dims
+    self._kwargs = kwargs
+
+  def __call__(self, shape, dtype):
+    stddev = 1.0 / np.sqrt(np.prod([shape[x] for x in self._dims]))
+    return tf.truncated_normal(
+        shape=shape, dtype=dtype, stddev=stddev, **self._kwargs)
+
+
+class RectifierInitializer(object):
+  """Gaussian initializer with standard deviation sqrt(2/fan_in).
+
+  Note that tf.random_normal is used internally to ensure the expected weight
+  distribution. This is intended to be used with ReLU activations, specially
+  in ResNets.
+
+  For details please refer to:
+  Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet
+  Classification
+  """
+
+  def __init__(self, dims=(0,), scale=2.0, **kwargs):
+    """Creates an initializer.
+
+    Args:
+      dims: Dimension(s) index to compute standard deviation:
+        sqrt(scale / product(shape[dims]))
+      scale: A constant scaling for the initialization used as
+        sqrt(scale / product(shape[dims])).
+      **kwargs: Extra keyword arguments to pass to tf.truncated_normal.
+    """
+    if isinstance(dims, six.integer_types):
+      self._dims = [dims]
+    else:
+      self._dims = dims
+    self._kwargs = kwargs
+    self._scale = scale
+
+  def __call__(self, shape, dtype):
+    stddev = np.sqrt(self._scale / np.prod([shape[x] for x in self._dims]))
+    return tf.random_normal(
+        shape=shape, dtype=dtype, stddev=stddev, **self._kwargs)
+
+
+class GaussianInitializer(object):
+  """Gaussian initializer with a given standard deviation.
+
+  Note that tf.truncated_normal is used internally. Therefore any random sample
+  outside two-sigma will be discarded and re-sampled.
+  """
+
+  def __init__(self, stddev=1.0):
+    self._stddev = stddev
+
+  def __call__(self, shape, dtype):
+    return tf.truncated_normal(shape=shape, dtype=dtype, stddev=self._stddev)
+

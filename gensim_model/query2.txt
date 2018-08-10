@@ -1,0 +1,1773 @@
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""
+Copyright 2016 Ryan Scott Brown <sb@ryansb.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
+import boto3
+import datetime
+import json
+import logging
+import socket
+import ssl
+
+sns = boto3.client('sns')
+cloudfront = boto3.client('cloudfront')
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+class AlreadyExpired(Exception):
+    pass
+
+def ssl_expiry_datetime(hostname):
+    ssl_date_fmt = r'%b %d %H:%M:%S %Y %Z'
+
+    context = ssl.create_default_context()
+    conn = context.wrap_socket(
+        socket.socket(socket.AF_INET),
+        server_hostname=hostname,
+    )
+    # 3 second timeout because Lambda has runtime limitations
+    conn.settimeout(3.0)
+
+    conn.connect((hostname, 443))
+    ssl_info = conn.getpeercert()
+    # parse the string from the certificate into a Python datetime object
+    return datetime.datetime.strptime(ssl_info['notAfter'], ssl_date_fmt)
+
+def ssl_valid_time_remaining(hostname):
+    expires = ssl_expiry_datetime(hostname)
+    logger.debug(
+        "SSL cert for %s expires at %s",
+        hostname, expires.isoformat()
+    )
+    return expires - datetime.datetime.utcnow()
+
+def ssl_expires_in(hostname, buffer_days=14):
+    """Check if `hostname` SSL cert expires is within `buffer_days`.
+
+    Raises `AlreadyExpired` if the cert is past due
+    """
+    remaining = ssl_valid_time_remaining(hostname)
+
+    # if the cert expires in less than two weeks, we should reissue it
+    if remaining < datetime.timedelta(days=0):
+        # cert has already expired - uhoh!
+        raise AlreadyExpired("Cert expired %s days ago" % remaining.days)
+    elif remaining < datetime.timedelta(days=buffer_days):
+        # expires sooner than the buffer
+        return True
+    else:
+        # everything is fine
+        return False
+
+
+def check_domain(domain, buffer_days=14):
+    try:
+        if not ssl_expires_in(domain, buffer_days):
+            logger.info("SSL certificate doesn't expire for a while - you're set!")
+            return {"success": True, "cert_status": "OK", "domain": domain}
+        else:
+            logger.warning("SSL certificate expires soon")
+            return {
+                "success": True,
+                "domain": domain,
+                "cert_status": "WARNING",
+                "message": "certificate is expiring soon",
+            }
+    except AlreadyExpired:
+        logger.exception("Certificate is expired, get worried!")
+        return {"success": True, "domain": domain, "cert_status": "EXPIRED"}
+    except:
+        import traceback
+        logger.exception("Failed to get certificate info")
+        return {
+            "success": False,
+            "domain": domain,
+            "cert_status": "unknown",
+            "message": traceback.format_exc()
+        }
+
+def lambda_handler(event, context):
+    results = []
+    for dist in cloudfront.list_distributions()['DistributionList']['Items']:
+        if dist.get('ViewerCertificate', {}).get('CloudFrontDefaultCertificate', False):
+            # this distribution uses default cloudfront SSL
+            # so we aren't in charge of renewing it
+            logger.info("Distribution %s doesn't use custom SSL, skipping" % dist['Id'])
+            continue
+
+        domain = dist['Aliases']['Items'][0]
+        result = check_domain(domain, event.get('buffer_days', 14))
+        results.append(result)
+        logger.debug("Got result %s for domain %s" % (json.dumps(result), domain))
+        if result['cert_status'] != 'OK' and event.get('topic', False):
+            # If cert expires soon and we have a notification topic
+            sns.publish(
+                TopicArn=event['topic'],
+                Message=json.dumps(result)
+            )
+    return results
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+import time
+
+from .messages import WechatMessage
+
+
+class WechatReply(object):
+    def __init__(self, message=None, **kwargs):
+        if 'source' not in kwargs and isinstance(message, WechatMessage):
+            kwargs['source'] = message.target
+        if 'target' not in kwargs and isinstance(message, WechatMessage):
+            kwargs['target'] = message.source
+        if 'time' not in kwargs:
+            kwargs['time'] = int(time.time())
+
+        self._args = dict()
+        for k, v in kwargs.items():
+            self._args[k] = v
+
+    def render(self):
+        raise NotImplementedError()
+
+
+class TextReply(WechatReply):
+    """
+    回复文字消息
+    """
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[text]]></MsgType>
+    <Content><![CDATA[{content}]]></Content>
+    </xml>
+    """
+
+    def __init__(self, message, content):
+        """
+        :param message: WechatMessage 对象
+        :param content: 文字回复内容
+        """
+        super(TextReply, self).__init__(message=message, content=content)
+
+    def render(self):
+        return TextReply.TEMPLATE.format(**self._args)
+
+
+class ImageReply(WechatReply):
+    """
+    回复图片消息
+    """
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[image]]></MsgType>
+    <Image>
+    <MediaId><![CDATA[{media_id}]]></MediaId>
+    </Image>
+    </xml>
+    """
+
+    def __init__(self, message, media_id):
+        """
+        :param message: WechatMessage 对象
+        :param media_id: 图片的 MediaID
+        """
+        super(ImageReply, self).__init__(message=message, media_id=media_id)
+
+    def render(self):
+        return ImageReply.TEMPLATE.format(**self._args)
+
+
+class VoiceReply(WechatReply):
+    """
+    回复语音消息
+    """
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[voice]]></MsgType>
+    <Voice>
+    <MediaId><![CDATA[{media_id}]]></MediaId>
+    </Voice>
+    </xml>
+    """
+
+    def __init__(self, message, media_id):
+        """
+        :param message: WechatMessage 对象
+        :param media_id: 语音的 MediaID
+        """
+        super(VoiceReply, self).__init__(message=message, media_id=media_id)
+
+    def render(self):
+        return VoiceReply.TEMPLATE.format(**self._args)
+
+
+class VideoReply(WechatReply):
+    """
+    回复视频消息
+    """
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[video]]></MsgType>
+    <Video>
+    <MediaId><![CDATA[{media_id}]]></MediaId>
+    <Title><![CDATA[{title}]]></Title>
+    <Description><![CDATA[{description}]]></Description>
+    </Video>
+    </xml>
+    """
+
+    def __init__(self, message, media_id, title=None, description=None):
+        """
+        :param message: WechatMessage对象
+        :param media_id: 视频的 MediaID
+        :param title: 视频消息的标题
+        :param description: 视频消息的描述
+        """
+        title = title or ''
+        description = description or ''
+        super(VideoReply, self).__init__(message=message, media_id=media_id, title=title, description=description)
+
+    def render(self):
+        return VideoReply.TEMPLATE.format(**self._args)
+
+
+class MusicReply(WechatReply):
+    """
+    回复音乐消息
+    """
+    TEMPLATE_THUMB = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[music]]></MsgType>
+    <Music>
+    <Title><![CDATA[{title}]]></Title>
+    <Description><![CDATA[{description}]]></Description>
+    <MusicUrl><![CDATA[{music_url}]]></MusicUrl>
+    <HQMusicUrl><![CDATA[{hq_music_url}]]></HQMusicUrl>
+    <ThumbMediaId><![CDATA[{thumb_media_id}]]></ThumbMediaId>
+    </Music>
+    </xml>
+    """
+
+    TEMPLATE_NOTHUMB = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[music]]></MsgType>
+    <Music>
+    <Title><![CDATA[{title}]]></Title>
+    <Description><![CDATA[{description}]]></Description>
+    <MusicUrl><![CDATA[{music_url}]]></MusicUrl>
+    <HQMusicUrl><![CDATA[{hq_music_url}]]></HQMusicUrl>
+    </Music>
+    </xml>
+    """
+
+    def __init__(self, message, title='', description='', music_url='', hq_music_url='', thumb_media_id=None):
+        title = title or ''
+        description = description or ''
+        music_url = music_url or ''
+        hq_music_url = hq_music_url or music_url
+        super(MusicReply, self).__init__(message=message, title=title, description=description,
+                                         music_url=music_url, hq_music_url=hq_music_url, thumb_media_id=thumb_media_id)
+
+    def render(self):
+        if self._args['thumb_media_id']:
+            return MusicReply.TEMPLATE_THUMB.format(**self._args)
+        else:
+            return MusicReply.TEMPLATE_NOTHUMB.format(**self._args)
+
+
+class Article(object):
+    def __init__(self, title=None, description=None, picurl=None, url=None):
+        self.title = title or ''
+        self.description = description or ''
+        self.picurl = picurl or ''
+        self.url = url or ''
+
+
+class ArticleReply(WechatReply):
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[news]]></MsgType>
+    <ArticleCount>{count}</ArticleCount>
+    <Articles>{items}</Articles>
+    </xml>
+    """
+
+    ITEM_TEMPLATE = u"""
+    <item>
+    <Title><![CDATA[{title}]]></Title>
+    <Description><![CDATA[{description}]]></Description>
+    <PicUrl><![CDATA[{picurl}]]></PicUrl>
+    <Url><![CDATA[{url}]]></Url>
+    </item>
+    """
+
+    def __init__(self, message, **kwargs):
+        super(ArticleReply, self).__init__(message, **kwargs)
+        self._articles = []
+
+    def add_article(self, article):
+        if len(self._articles) >= 10:
+            raise AttributeError("Can't add more than 10 articles in an ArticleReply")
+        else:
+            self._articles.append(article)
+
+    def render(self):
+        items = []
+        for article in self._articles:
+            items.append(ArticleReply.ITEM_TEMPLATE.format(
+                title=article.title,
+                description=article.description,
+                picurl=article.picurl,
+                url=article.url,
+            ))
+        self._args["items"] = ''.join(items)
+        self._args["count"] = len(items)
+        return ArticleReply.TEMPLATE.format(**self._args)
+
+
+class GroupTransferReply(WechatReply):
+    """
+    客服群发转发消息
+    """
+    TEMPLATE = u"""
+    <xml>
+    <ToUserName><![CDATA[{target}]]></ToUserName>
+    <FromUserName><![CDATA[{source}]]></FromUserName>
+    <CreateTime>{time}</CreateTime>
+    <MsgType><![CDATA[transfer_customer_service]]></MsgType>
+    </xml>
+    """
+
+    def __init__(self, message):
+        """
+        :param message: WechatMessage 对象
+        """
+        super(GroupTransferReply, self).__init__(message=message)
+
+    def render(self):
+        return GroupTransferReply.TEMPLATE.format(**self._args)
+
+
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""
+Renderer and value mapper for file upload used to upload a resource into 
+the local data store.
+"""
+
+__author__      = "Graham Klyne (GK@ACM.ORG)"
+__copyright__   = "Copyright 2014, G. Klyne"
+__license__     = "MIT (http://opensource.org/licenses/MIT)"
+
+import logging
+log = logging.getLogger(__name__)
+
+from annalist.views.fields.render_base          import RenderBase
+from annalist.views.fields.render_fieldvalue    import (
+    RenderFieldValue,
+    get_field_edit_value,
+    get_field_view_value
+    )
+
+from django.template    import Template, Context
+
+#   ----------------------------------------------------------------------------
+#
+#   Link URI value mapping
+#
+#   ----------------------------------------------------------------------------
+
+
+class FileUploadValueMapper(RenderBase):
+    """
+    Value mapper class for token list
+    """
+
+    @classmethod
+    def resource_name(cls, data_value):
+        """
+        Extracts import URL ref from value structure, for field display.
+        """
+        return (data_value or {}).get('resource_name', "(@@resource_name not present)")
+
+    @classmethod
+    def uploaded_file(cls, data_value):
+        """
+        Extracts uploaded filename from value structure, for field display.
+        """
+        return (data_value or {}).get('uploaded_file', "")
+
+
+    @classmethod
+    def encode(cls, data_value):
+        """
+        Extracts import URL ref from value structure, for field display.
+        """
+        return cls.resource_name(data_value)
+
+    @classmethod
+    def decode(cls, field_value):
+        """
+        Returns textual path value from file upload field value
+        """
+        return field_value or ""
+
+    def decode_store(self, field_value, entityvals, property_uri):
+        """
+        Decodes a supplied value and uses it to update the 'upload_file'
+        field of an URI import field.  
+        """
+        u = self.decode(field_value)
+        v = entityvals.get(property_uri, {})
+        try:
+            v['resource_name'] = u
+        except TypeError:
+            v = {'resource_name': u}    # Ignore non-updatable value
+        entityvals[property_uri] = v
+        return v
+
+#   ----------------------------------------------------------------------------
+#
+#   Import value templates
+#
+#   ----------------------------------------------------------------------------
+
+# NOTE: this is a minimal rendering.  Enhancements might include additional information 
+#       from the entity field, especially for the view (e.g. content-type, etc.)
+# NOTE: The <a> element supports a `type` attribute 
+#       (cf. https://developer.mozilla.org/en-US/docs/Web/HTML/Element/a)
+
+view_upload = (
+    """Uploaded file <a href="%s" target="_blank">%s</a>""")
+
+edit_upload = (
+    """<!-- fields.render_file_upload -->
+    <input type="file" name="{{repeat_prefix}}{{field.description.field_name}}"
+           placeholder="{{field.description.field_placeholder}}"
+           value="{{resource_name}}" />
+    {% if uploaded_file != "" %}
+    Previously uploaded: {{uploaded_file}}
+    {% endif %}
+    """)
+
+#   ----------------------------------------------------------------------------
+#
+#   Link URI field renderers
+#
+#   ----------------------------------------------------------------------------
+
+class File_upload_view_renderer(object):
+
+    def render(self, context):
+        """
+        Render import link for viewing.
+        """
+        val      = get_field_view_value(context, None)
+        linkval  = FileUploadValueMapper.resource_name(val)
+        textval  = FileUploadValueMapper.uploaded_file(val)
+        return view_upload%(linkval, textval)
+
+class File_upload_edit_renderer(object):
+
+    def __init__(self):
+        self._template = Template(edit_upload)
+        return
+
+    def render(self, context):
+        """
+        Render import link for editing
+        """
+        val = get_field_edit_value(context, None)
+        resource_name = FileUploadValueMapper.resource_name(val)
+        uploaded_file = FileUploadValueMapper.uploaded_file(val)
+        with context.push(resource_name=resource_name, uploaded_file=uploaded_file):
+            result = self._template.render(context)
+        return result
+
+def get_file_upload_renderer():
+    """
+    Return field renderer object for uri import value
+    """
+    return RenderFieldValue("file_upload",
+        view_renderer=File_upload_view_renderer(), 
+        edit_renderer=File_upload_edit_renderer(),
+        )
+
+# End.
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+#-----------------------------------------------------------------
+# pycparser: __init__.py
+#
+# This package file exports some convenience functions for
+# interacting with pycparser
+#
+# Copyright (C) 2008-2012, Eli Bendersky
+# License: BSD
+#-----------------------------------------------------------------
+__all__ = ['c_lexer', 'c_parser', 'c_ast']
+__version__ = '2.10'
+
+from subprocess import Popen, PIPE
+from .c_parser import CParser
+
+
+def preprocess_file(filename, cpp_path='cpp', cpp_args=''):
+    """ Preprocess a file using cpp.
+
+        filename:
+            Name of the file you want to preprocess.
+
+        cpp_path:
+        cpp_args:
+            Refer to the documentation of parse_file for the meaning of these
+            arguments.
+
+        When successful, returns the preprocessed file's contents.
+        Errors from cpp will be printed out.
+    """
+    path_list = [cpp_path]
+    if isinstance(cpp_args, list):
+        path_list += cpp_args
+    elif cpp_args != '':
+        path_list += [cpp_args]
+    path_list += [filename]
+
+    try:
+        # Note the use of universal_newlines to treat all newlines
+        # as \n for Python's purpose
+        #
+        pipe = Popen(   path_list,
+                        stdout=PIPE,
+                        universal_newlines=True)
+        text = pipe.communicate()[0]
+    except OSError as e:
+        raise RuntimeError("Unable to invoke 'cpp'.  " +
+            'Make sure its path was passed correctly\n' +
+            ('Original error: %s' % e))
+
+    return text
+
+
+def parse_file(filename, use_cpp=False, cpp_path='cpp', cpp_args='',
+               parser=None):
+    """ Parse a C file using pycparser.
+
+        filename:
+            Name of the file you want to parse.
+
+        use_cpp:
+            Set to True if you want to execute the C pre-processor
+            on the file prior to parsing it.
+
+        cpp_path:
+            If use_cpp is True, this is the path to 'cpp' on your
+            system. If no path is provided, it attempts to just
+            execute 'cpp', so it must be in your PATH.
+
+        cpp_args:
+            If use_cpp is True, set this to the command line arguments strings
+            to cpp. Be careful with quotes - it's best to pass a raw string
+            (r'') here. For example:
+            r'-I../utils/fake_libc_include'
+            If several arguments are required, pass a list of strings.
+
+        parser:
+            Optional parser object to be used instead of the default CParser
+
+        When successful, an AST is returned. ParseError can be
+        thrown if the file doesn't parse successfully.
+
+        Errors from cpp will be printed out.
+    """
+    if use_cpp:
+        text = preprocess_file(filename, cpp_path, cpp_args)
+    else:
+        with open(filename, 'rU') as f:
+            text = f.read()
+
+    if parser is None:
+        parser = CParser()
+    return parser.parse(text, filename)
+
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+""" Tests of BIDS-specific functionality. Generic tests of core grabbit
+functionality should go in the grabbit package. """
+
+import pytest
+from bids.grabbids import BIDSLayout
+from os.path import join, abspath
+from bids.tests import get_test_data_path
+
+
+# Fixture uses in the rest of the tests
+@pytest.fixture(scope='module')
+def testlayout1():
+    data_dir = join(get_test_data_path(), '7t_trt')
+    return BIDSLayout(data_dir)
+
+
+@pytest.fixture(scope='module')
+def testlayout2():
+    data_dir = join(get_test_data_path(), 'ds005')
+    return BIDSLayout(data_dir, exclude=['models/', 'derivatives/'])
+
+
+@pytest.fixture(scope='module')
+def deriv_layout():
+    data_dir = join(get_test_data_path(), 'ds005')
+    deriv_dir = join(data_dir, 'derivatives')
+    return BIDSLayout([(data_dir, 'bids'),
+                       (deriv_dir, ['bids', 'derivatives'])])
+
+
+def test_layout_init(testlayout1):
+    assert isinstance(testlayout1.files, dict)
+
+
+def test_load_description(testlayout1):
+    # Should not raise an error
+    assert hasattr(testlayout1, 'description')
+    assert testlayout1.description['Name'] == '7t_trt'
+    assert testlayout1.description['BIDSVersion'] == "1.0.0rc3"
+
+
+def test_get_metadata(testlayout1):
+    target = 'sub-03/ses-2/func/sub-03_ses-2_task-' \
+             'rest_acq-fullbrain_run-2_bold.nii.gz'
+    result = testlayout1.get_metadata(join(testlayout1.root, target))
+    assert result['RepetitionTime'] == 3.0
+
+
+def test_get_metadata2(testlayout1):
+    target = 'sub-03/ses-1/fmap/sub-03_ses-1_run-1_phasediff.nii.gz'
+    result = testlayout1.get_metadata(join(testlayout1.root, target))
+    assert result['EchoTime1'] == 0.006
+
+
+def test_get_metadata3(testlayout1):
+    target = 'sub-01/ses-1/func/sub-01_ses-1_task-rest_acq-fullbrain_run-1_bold.nii.gz'
+    result = testlayout1.get_metadata(join(testlayout1.root, target))
+    assert result['EchoTime'] == 0.020
+
+    target = 'sub-01/ses-1/func/sub-01_ses-1_task-rest_acq-fullbrain_run-2_bold.nii.gz'
+    result = testlayout1.get_metadata(join(testlayout1.root, target))
+    assert result['EchoTime'] == 0.017
+
+
+def test_get_metadata4(testlayout2):
+    target = 'sub-03/anat/sub-03_T1w.nii.gz'
+    result = testlayout2.get_metadata(join(testlayout2.root, target))
+    assert result == {}
+
+
+def test_get_metadata5(testlayout1):
+    target = 'sub-01/ses-1/func/sub-01_ses-1_task-rest_acq-fullbrain_run-1_bold.nii.gz'
+    result = testlayout1.get_metadata(join(testlayout1.root, target),
+                                      include_entities=True)
+    assert result['EchoTime'] == 0.020
+    assert result['subject'] == '01'
+    assert result['acquisition'] == 'fullbrain'
+
+
+def test_get_bvals_bvecs(testlayout2):
+    dwifile = testlayout2.get(subject="01", modality="dwi")[0]
+    result = testlayout2.get_bval(dwifile.filename)
+    assert result == abspath(join(testlayout2.root, 'dwi.bval'))
+
+    result = testlayout2.get_bvec(dwifile.filename)
+    assert result == abspath(join(testlayout2.root, 'dwi.bvec'))
+
+
+def test_get_subjects(testlayout1):
+    result = testlayout1.get_subjects()
+    predicted = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
+    assert predicted == result
+
+
+def test_get_fieldmap(testlayout1):
+    target = 'sub-03/ses-1/func/sub-03_ses-1_task-' \
+             'rest_acq-fullbrain_run-1_bold.nii.gz'
+    result = testlayout1.get_fieldmap(join(testlayout1.root, target))
+    assert result["type"] == "phasediff"
+    assert result["phasediff"].endswith('sub-03_ses-1_run-1_phasediff.nii.gz')
+
+
+def test_get_fieldmap2(testlayout1):
+    target = 'sub-03/ses-2/func/sub-03_ses-2_task-' \
+             'rest_acq-fullbrain_run-2_bold.nii.gz'
+    result = testlayout1.get_fieldmap(join(testlayout1.root, target))
+    assert result["type"] == "phasediff"
+    assert result["phasediff"].endswith('sub-03_ses-2_run-2_phasediff.nii.gz')
+
+
+def test_bids_json(testlayout1):
+    assert testlayout1.get(return_type='id', target='run') == ['1', '2']
+    assert testlayout1.get(return_type='id', target='session') == ['1', '2']
+
+
+def test_exclude(testlayout2):
+    assert join(
+        testlayout2.root, 'models/ds-005_type-russ_sub-all_model.json') \
+        not in testlayout2.files
+    assert 'all' not in testlayout2.get_subjects()
+    for f in testlayout2.files.values():
+        assert 'derivatives' not in f.path
+
+
+def test_layout_with_derivs(deriv_layout):
+    assert deriv_layout.root == join(get_test_data_path(), 'ds005')
+    assert isinstance(deriv_layout.files, dict)
+    assert set(deriv_layout.domains.keys()) == {'bids', 'derivatives'}
+    assert deriv_layout.domains['bids'].files
+    assert deriv_layout.domains['derivatives'].files
+    assert 'derivatives.roi' in deriv_layout.entities
+    assert 'bids.roi' not in deriv_layout.entities
+    assert 'bids.subject' in deriv_layout.entities
+
+
+def test_query_derivatives(deriv_layout):
+    result = deriv_layout.get(type='events', return_type='object',
+                              domains='derivatives')
+    assert len(result) == 1
+    assert result[0].filename == 'sub-01_task-mixedgamblestask_run-01_events.tsv'
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+# -*- coding: UTF-8 -*-
+from flask import url_for
+
+
+class CDN(object):
+    """Base class for CDN objects."""
+
+    def __init__(self, **kwargs):
+        for key, val in kwargs.items():
+            setattr(self, key, val)
+
+    def get_resource_url(self):
+        """Return resource url for filename."""
+        raise NotImplementedError
+
+
+class LocalCDN(CDN):
+    """ A CDN that serves content from the local application. """
+    static_endpoint = 'vue.static'
+
+    def get_resource_url(self):
+        filename = '{}{}.js'.format(self.name, '.min' if self.use_minified else '')
+        return url_for(self.static_endpoint, filename=filename)
+
+
+class CloudflareCDN(CDN):
+    """ Serves files from the Web. """
+    baseurl = '//cdnjs.cloudflare.com/ajax/libs/{name}/{version}/{filename}'
+
+    def get_resource_url(self):
+        filename = '{}{}.js'.format(self.name, '.min' if self.use_minified else '')
+        return self.baseurl.format(name=self.name, version=self.version, filename=filename)
+
+
+class JsdelivrCDN(CDN):
+    """ Serves files from the Web. """
+    baseurl = '//cdn.jsdelivr.net/{name}/{version}/{filename}'
+
+    def get_resource_url(self):
+        name = self.name.replace('-', '.')
+        filename = '{}{}.js'.format(self.name, '.min' if self.use_minified else '')
+        return self.baseurl.format(name=name, version=self.version, filename=filename)
+
+
+class BootcssCDN(CDN):
+    """ Serves files from the Web. """
+    baseurl = '//cdn.bootcss.com/{name}/{version}/{filename}'
+
+    def get_resource_url(self):
+        filename = '{}{}.js'.format(self.name, '.min' if self.use_minified else '')
+        return self.baseurl.format(name=self.name, version=self.version, filename=filename)
+
+
+cloudflare = CloudflareCDN
+jsdelivr = JsdelivrCDN
+bootcss = BootcssCDN
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+#BEGIN_LEGAL
+#
+#Copyright (c) 2018 Intel Corporation
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#  
+#END_LEGAL
+
+import collections
+import actions
+import types
+import sys
+
+class actions_codegen_t(object):
+    ''' This file is about:
+    (a) examining the actions that we'll do after hashing. 
+    Some actions may be conditional and this creates valid indicators for the 
+    conditional bindings.
+    (b) printing the values of the actions for the hash table initialization. 
+    (c) printing the conditional initialization of the xed fields after 
+    successful hashing. Including calling other functions and returning values.
+    '''
+    def __init__(self, tuple2rule, default_actions, strings_dict):
+        ''' params: tuple2rule: is a mapping from tuple to a rule
+                    default_actions is a list action when we do not hit 
+                        a valid hash entry
+                    strings_dict a is mapping of string to string'''
+        self.all_fbs = None
+        self.common_fbs = None
+        self.max_nt_number = 0
+        self.tuple2rule = tuple2rule
+        self.default_actions = default_actions    
+        self.strings_dict = strings_dict
+        
+        #this is a mapping from a tuple to a lost of action_t objects
+        self.tuple2actions = self._preprocess(tuple2rule)
+        
+    def _gather_all_fb(self, rules):
+        ''' returns a tuple of:
+        (1) the super set of all the field binding
+        (2) the intersection of all the fb 
+        '''
+        if len(rules) == 0:
+            return ([], [])
+        
+        #create a bin of fbs, one entry per rule 
+        fbs_bin = []
+        for rule in rules:
+            rule_fbs = set()
+            for action in rule.actions:
+                if action.is_field_binding():
+                    rule_fbs.add(action.field_name.lower())
+            fbs_bin.append(rule_fbs)
+            
+        
+        all_fbs = set()
+        common_fbs = fbs_bin[0]
+        for bin in fbs_bin:
+            all_fbs.update(bin)
+            common_fbs.intersection_update(bin)
+        
+        return sorted(all_fbs), common_fbs
+    
+    def _get_max_nt_number(self, rules):
+        ''' find the maximal number of nt and ntlus among all the rules'''
+        nts_per_rule = []
+        ntlufs_per_rule = []
+        for rule in rules:
+            nts = 0
+            ntlufs = 0
+            for action in rule.actions:
+                if action.is_nonterminal():
+                    nts += 1
+                if action.is_ntluf():
+                    ntlufs += 1    
+            nts_per_rule.append(nts)
+            ntlufs_per_rule.append(ntlufs)
+        
+        if nts_per_rule:
+            return max(nts_per_rule), max(ntlufs_per_rule)
+        return 0,0
+    
+    def _create_ntluf_actions(self, action_list):
+        '''  return a list of all the ntluf actions  '''
+        i = 0
+        ntluf_list = []
+        for action in action_list:
+            if action.is_ntluf():
+                if i < self.max_ntluf_number:
+                    ntluf_list.append(action)
+                else:
+                    genutil.die('currently do not support unequal \
+                                number of ntluf among all the rules')
+                i += 1    
+        #adding null pointer values to the actions list so all the rules will 
+        #have the same number of actions 
+        while i < self.max_ntluf_number:
+            nt_list.append(actions.gen_null_fb())
+            i += 1
+
+        return ntluf_list
+    def _create_nt_actions(self, action_list):
+        '''  return a list of all the nt actions  '''
+        i = 0
+        nt_list = []
+        for action in action_list:
+            if action.is_nonterminal():
+                if i < self.max_nt_number:
+                    nt_list.append(action)
+                else:
+                    genutil.die('currently do not support unequal number of \
+                                nt among all the rules')
+                i += 1    
+        #adding null pointer values to the actions list so all the rules will 
+        #have the same number of actions 
+        while i < self.max_nt_number:
+            nt_list.append(actions.gen_null_fb())
+            i += 1
+                    
+        return nt_list
+                
+
+    def _create_fb_actions(self, all_fbs, common_fbs, rule):
+        ''' creates a list fb actions for the given rule.
+        in case the given rule does not have an action for some fb in the  
+        all_fbs list, we add a dummy action node '''
+        
+        fbs = all_fbs
+        fb_list = []
+        for fb_name in fbs:
+            fb_found = False
+            for action in rule.actions:
+                if action.is_field_binding() and \
+                    action.field_name.lower() == fb_name:
+                    fb_found = True
+                    fb_list.append(action)
+            
+            if not fb_found:
+                #the rule does not have action for this fb, creating a dummy 
+                #node for it
+                fb_list.append(actions.gen_dummy_fb(fb_name))
+                        
+        return fb_list
+                        
+    def _get_return_action(self, actions):
+        ''' find a return action and return it '''
+        for action in actions:
+            if action.is_return():
+                return [action]
+        return []
+    
+    def _has_emit(self, rules):
+        ''' returns True if one of the rules has emit action'''
+
+        for rule in rules:
+            if rule.has_emit_action():
+                return True
+        return False
+    
+    def _preprocess(self, tuple2rule):
+        ''' generates the following information:
+        (1) the super set of all the field bindings among the rules
+        (2) the intersection of the fb.
+        (3) the max number of nonterminal functions
+        (4) if we have a 'return' action
+        (5) a mapping from tuple to a list of all the actions that were 
+        captured '''
+        tuple2actions = {}
+         
+        rules = list(tuple2rule.values())
+        self.rules = rules
+        self.all_fbs, self.common_fbs = self._gather_all_fb(rules)
+        self.max_nt_number, self.max_ntluf_number = self._get_max_nt_number(rules)
+        self.ret_action = False
+        self.has_emit = self._has_emit(rules)
+        
+        for tuple, rule in tuple2rule.items():
+            actions = self._create_fb_actions(self.all_fbs, self.common_fbs, rule)
+            nts = self._create_nt_actions(rule.actions)
+            ntlufs = self._create_ntluf_actions(rule.actions)
+            ret_action = self._get_return_action(rule.actions)
+            if ret_action:
+                self.ret_action = True
+            tuple2actions[tuple] = actions + nts + ntlufs + ret_action
+         
+            
+        return tuple2actions
+    
+    def get_actions_desc(self):
+        ''' returns the description of the action types '''
+        desc = []
+        for fb in self.all_fbs:
+            desc.append("%s %s" % (self.strings_dict['fb_type'], fb))
+        for i in range(self.max_nt_number):
+            desc.append("%s ntptr%d" % (self.strings_dict['nt_fptr'], i))  
+        for i in range(self.max_ntluf_number):
+            desc.append("%s ntlufptr%d" % (self.strings_dict['ntluf_fptr'], i))    
+        if self.ret_action:
+            desc.append("%s value" % self.strings_dict['return_type'])
+        if self.has_emit:
+            desc.append("%s emit" % self.strings_dict['return_type'])    
+        
+        if desc:    
+            return " ;".join(desc) + ";"
+        return ""
+    
+    def no_actions(self):
+        ''' returns True if there is no actions, of any kind.
+            returns False if there is at least one action '''
+        if self.all_fbs or self.common_fbs or self.max_nt_number or \
+           self.max_ntluf_number or self.ret_action or self.has_emit:
+            return False
+        return True
+
+    def get_values(self, tuple):
+        ''' return the values of the actions for the specific given tuple'''
+        action_vals = [] 
+        
+        actions_list = self.tuple2actions[tuple]
+        for action in actions_list:
+            val = action.get_str_value()
+            if action.is_nonterminal():
+                val = "%s_%s_BIND" % (self.strings_dict['nt_prefix'],val)
+            if action.is_ntluf():
+                val = "%s_%s" % (self.strings_dict['ntluf_prefix'],val)    
+            action_vals.append(val)
+        
+        if self.has_emit:
+            if self.tuple2rule[tuple].has_emit_action():
+                hash_index = self.tuple2rule[tuple].index
+                action_vals.append(str(hash_index))
+            else:    
+                action_vals.append('0')
+        values = ",".join(action_vals)
+        return values      
+
+    def emit_actions(self):
+        ''' dump the code that executes the actions '''
+        
+        actions_list = []
+        fb_template = "%s_set_%s(%s,%s)"
+        hash_entry = "%s[%s].%s" 
+        
+        #dump the code for the fb
+        for fb in self.all_fbs:
+            hash_val = hash_entry % (self.strings_dict['table_name'],
+                                     self.strings_dict['hidx_str'], fb)
+            action = fb_template % (self.strings_dict['op_accessor'],
+                                    fb, self.strings_dict['obj_str'], hash_val)
+            
+            if fb not in self.common_fbs:
+                #we need to add fb validation
+                validation = "if(%s >= 0) " % hash_val
+                action = validation + action
+            actions_list.append(action)
+        
+        #dump the code for the nonterminal
+        for i in range(self.max_nt_number):
+            fptri = "ntptr%d" % i
+            hash_val = hash_entry % (self.strings_dict['table_name'],
+                                  self.strings_dict['hidx_str'], fptri)
+            validation = "if(%s != 0) " % hash_val
+            f_call = "res=(*%s)(%s)" % (hash_val, self.strings_dict['obj_str'])
+            actions_list.append(validation + f_call)
+            
+            nt = list(self.tuple2rule.values())[0].nt
+            obj_str = self.strings_dict['obj_str']
+            emit_call = "xed_encoder_request_iforms(%s)->x_%s=hidx+1"
+            actions_list.append(emit_call % (obj_str,nt))
+               
+        #dump the code for the ntluf
+        for i in range(self.max_ntluf_number):
+               fptri = "ntlufptr%d" % i
+               hash_val = hash_entry % (self.strings_dict['table_name'],
+                                     self.strings_dict['hidx_str'], fptri)
+               validation = "if(%s != 0) " % hash_val
+               f_call = "res=(*%s)(%s,%s)" % (hash_val, self.strings_dict['obj_str'], 'arg_reg')
+               actions_list.append(validation + f_call)
+        #dump the return code
+        if self.ret_action:
+            ret_str = "return %s[%s].value" % (self.strings_dict['table_name'],
+                                                self.strings_dict['hidx_str'])
+            actions_list.append(ret_str)    
+        
+        #dump the emit action
+        if self.has_emit:
+            nt = list(self.tuple2rule.values())[0].nt
+            obj_str = self.strings_dict['obj_str']
+            emit_call = "xed_encoder_request_iforms(%s)->x_%s=%s"
+            hash_entry =  "%s[%s].emit" % (self.strings_dict['table_name'],
+                                           self.strings_dict['hidx_str'])
+            actions_list.append(emit_call % (obj_str,nt,hash_entry))
+        return actions_list
+    
+    def _has_return_stmt(self):
+        ''' we assume it is enough to check only the first rule, since if 
+        on rule has return stmt than all the rules will have one ''' 
+        for action in self.rules[0].actions:
+            if action.is_return():
+                return True
+        return False
+    
+    def get_return_type(self):
+        ''' get the c type of the return action ''' 
+        if self._has_return_stmt():
+            return self.strings_dict['return_type'] 
+        else:
+            return 'void' 
+        
+    def emit_default(self):
+        ''' emit the action taken when we did not hit a valid hash table entry
+        '''
+        actions = []
+        for action in self.default_actions:
+           if action.is_return():
+               s =  "return %s" % action.get_str_value()
+               actions.append(s)
+           if action.is_field_binding():
+               val = action.get_str_value()
+               fb = action.field_name.lower()
+               s = "%s_set_%s(%s,%s)" % (self.strings_dict['op_accessor'], fb,
+                                         self.strings_dict['obj_str'], val)
+               actions.append(s)
+                
+        return actions
+            
+    def get_empty_slots(self):
+        ''' return a list of the empty slots that will be used in the lu table 
+        whenever we do not have a valid hash entry '''
+        slots_num = 0
+        slots_num += len(self.all_fbs)
+        slots_num += self.max_nt_number
+        slots_num += self.max_ntluf_number
+        # FIXME: the ret_action seems like the only thing that matters
+        # for the decoder
+        if self.ret_action:
+            slots_num += 1
+        if self.has_emit:
+            slots_num += 1
+        return ['0'] * slots_num
+        
+    def has_fcall(self):
+        return self.max_nt_number > 0 or self.max_ntluf_number > 0    
+
+
+    
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+# vim: autoindent shiftwidth=4 expandtab textwidth=120 tabstop=4 softtabstop=4
+
+###############################################################################
+# OpenLP - Open Source Lyrics Projection                                      #
+# --------------------------------------------------------------------------- #
+# Copyright (c) 2008-2015 OpenLP Developers                                   #
+# --------------------------------------------------------------------------- #
+# This program is free software; you can redistribute it and/or modify it     #
+# under the terms of the GNU General Public License as published by the Free  #
+# Software Foundation; version 2 of the License.                              #
+#                                                                             #
+# This program is distributed in the hope that it will be useful, but WITHOUT #
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or       #
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for    #
+# more details.                                                               #
+#                                                                             #
+# You should have received a copy of the GNU General Public License along     #
+# with this program; if not, write to the Free Software Foundation, Inc., 59  #
+# Temple Place, Suite 330, Boston, MA 02111-1307 USA                          #
+###############################################################################
+"""
+Functional tests to test the AppLocation class and related methods.
+"""
+
+from unittest import TestCase
+
+from openlp.core.common import check_directory_exists, de_hump, trace_error_handler, translate, is_win, is_macosx, \
+    is_linux, clean_button_text
+from tests.functional import MagicMock, patch
+
+
+class TestCommonFunctions(TestCase):
+    """
+    A test suite to test out various functions in the openlp.core.common module.
+    """
+    def check_directory_exists_test(self):
+        """
+        Test the check_directory_exists() function
+        """
+        with patch('openlp.core.lib.os.path.exists') as mocked_exists, \
+                patch('openlp.core.lib.os.makedirs') as mocked_makedirs:
+            # GIVEN: A directory to check and a mocked out os.makedirs and os.path.exists
+            directory_to_check = 'existing/directory'
+
+            # WHEN: os.path.exists returns True and we check to see if the directory exists
+            mocked_exists.return_value = True
+            check_directory_exists(directory_to_check)
+
+            # THEN: Only os.path.exists should have been called
+            mocked_exists.assert_called_with(directory_to_check)
+            self.assertIsNot(mocked_makedirs.called, 'os.makedirs should not have been called')
+
+            # WHEN: os.path.exists returns False and we check the directory exists
+            mocked_exists.return_value = False
+            check_directory_exists(directory_to_check)
+
+            # THEN: Both the mocked functions should have been called
+            mocked_exists.assert_called_with(directory_to_check)
+            mocked_makedirs.assert_called_with(directory_to_check)
+
+            # WHEN: os.path.exists raises an IOError
+            mocked_exists.side_effect = IOError()
+            check_directory_exists(directory_to_check)
+
+            # THEN: We shouldn't get an exception though the mocked exists has been called
+            mocked_exists.assert_called_with(directory_to_check)
+
+            # WHEN: Some other exception is raised
+            mocked_exists.side_effect = ValueError()
+
+            # THEN: check_directory_exists raises an exception
+            mocked_exists.assert_called_with(directory_to_check)
+            self.assertRaises(ValueError, check_directory_exists, directory_to_check)
+
+    def de_hump_conversion_test(self):
+        """
+        Test the de_hump function with a class name
+        """
+        # GIVEN: a Class name in Camel Case
+        string = "MyClass"
+
+        # WHEN: we call de_hump
+        new_string = de_hump(string)
+
+        # THEN: the new string should be converted to python format
+        self.assertTrue(new_string == "my_class", 'The class name should have been converted')
+
+    def de_hump_static_test(self):
+        """
+        Test the de_hump function with a python string
+        """
+        # GIVEN: a Class name in Camel Case
+        string = "my_class"
+
+        # WHEN: we call de_hump
+        new_string = de_hump(string)
+
+        # THEN: the new string should be converted to python format
+        self.assertTrue(new_string == "my_class", 'The class name should have been preserved')
+
+    def trace_error_handler_test(self):
+        """
+        Test the trace_error_handler() method
+        """
+        # GIVEN: Mocked out objects
+        with patch('openlp.core.common.traceback') as mocked_traceback:
+            mocked_traceback.extract_stack.return_value = [('openlp.fake', 56, None, 'trace_error_handler_test')]
+            mocked_logger = MagicMock()
+
+            # WHEN: trace_error_handler() is called
+            trace_error_handler(mocked_logger)
+
+            # THEN: The mocked_logger.error() method should have been called with the correct parameters
+            mocked_logger.error.assert_called_with(
+                'OpenLP Error trace\n   File openlp.fake at line 56 \n\t called trace_error_handler_test')
+
+    def translate_test(self):
+        """
+        Test the translate() function
+        """
+        # GIVEN: A string to translate and a mocked Qt translate function
+        context = 'OpenLP.Tests'
+        text = 'Untranslated string'
+        comment = 'A comment'
+        encoding = 1
+        n = 1
+        mocked_translate = MagicMock(return_value='Translated string')
+
+        # WHEN: we call the translate function
+        result = translate(context, text, comment, encoding, n, mocked_translate)
+
+        # THEN: the translated string should be returned, and the mocked function should have been called
+        mocked_translate.assert_called_with(context, text, comment, encoding, n)
+        self.assertEqual('Translated string', result, 'The translated string should have been returned')
+
+    def is_win_test(self):
+        """
+        Test the is_win() function
+        """
+        # GIVEN: Mocked out objects
+        with patch('openlp.core.common.os') as mocked_os, patch('openlp.core.common.sys') as mocked_sys:
+
+            # WHEN: The mocked os.name and sys.platform are set to 'nt' and 'win32' repectivly
+            mocked_os.name = 'nt'
+            mocked_sys.platform = 'win32'
+
+            # THEN: The three platform functions should perform properly
+            self.assertTrue(is_win(), 'is_win() should return True')
+            self.assertFalse(is_macosx(), 'is_macosx() should return False')
+            self.assertFalse(is_linux(), 'is_linux() should return False')
+
+    def is_macosx_test(self):
+        """
+        Test the is_macosx() function
+        """
+        # GIVEN: Mocked out objects
+        with patch('openlp.core.common.os') as mocked_os, patch('openlp.core.common.sys') as mocked_sys:
+
+            # WHEN: The mocked os.name and sys.platform are set to 'posix' and 'darwin' repectivly
+            mocked_os.name = 'posix'
+            mocked_sys.platform = 'darwin'
+
+            # THEN: The three platform functions should perform properly
+            self.assertTrue(is_macosx(), 'is_macosx() should return True')
+            self.assertFalse(is_win(), 'is_win() should return False')
+            self.assertFalse(is_linux(), 'is_linux() should return False')
+
+    def is_linux_test(self):
+        """
+        Test the is_linux() function
+        """
+        # GIVEN: Mocked out objects
+        with patch('openlp.core.common.os') as mocked_os, patch('openlp.core.common.sys') as mocked_sys:
+
+            # WHEN: The mocked os.name and sys.platform are set to 'posix' and 'linux3' repectivly
+            mocked_os.name = 'posix'
+            mocked_sys.platform = 'linux3'
+
+            # THEN: The three platform functions should perform properly
+            self.assertTrue(is_linux(), 'is_linux() should return True')
+            self.assertFalse(is_win(), 'is_win() should return False')
+            self.assertFalse(is_macosx(), 'is_macosx() should return False')
+
+    def clean_button_text_test(self):
+        """
+        Test the clean_button_text() function.
+        """
+        # GIVEN: Button text
+        input_text = '&Next >'
+        expected_text = 'Next'
+
+        # WHEN: The button caption is sent through the clean_button_text function
+        actual_text = clean_button_text(input_text)
+
+        # THEN: The text should have been cleaned
+        self.assertEqual(expected_text, actual_text, 'The text should be clean')
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+"""
+***************************************************************************
+    Heatmap.py
+    ---------------------
+    Date                 : November 2016
+    Copyright            : (C) 2016 by Nyall Dawson
+    Email                : nyall dot dawson at gmail dot com
+***************************************************************************
+*                                                                         *
+*   This program is free software; you can redistribute it and/or modify  *
+*   it under the terms of the GNU General Public License as published by  *
+*   the Free Software Foundation; either version 2 of the License, or     *
+*   (at your option) any later version.                                   *
+*                                                                         *
+***************************************************************************
+"""
+
+__author__ = 'Nyall Dawson'
+__date__ = 'November 2016'
+__copyright__ = '(C) 2016, Nyall Dawson'
+
+# This will get replaced with a git SHA1 when you do a git archive
+
+__revision__ = '$Format:%H$'
+
+import os
+from collections import OrderedDict
+
+from qgis.PyQt.QtGui import QIcon
+
+from qgis.core import (QgsApplication,
+                       QgsFeatureRequest,
+                       QgsRasterFileWriter,
+                       QgsProcessing,
+                       QgsProcessingException,
+                       QgsProcessingParameterFeatureSource,
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterField,
+                       QgsProcessingParameterEnum,
+                       QgsProcessingParameterDefinition,
+                       QgsProcessingParameterRasterDestination)
+
+from qgis.analysis import QgsKernelDensityEstimation
+
+from processing.algs.qgis.QgisAlgorithm import QgisAlgorithm
+
+pluginPath = os.path.split(os.path.split(os.path.dirname(__file__))[0])[0]
+
+
+class Heatmap(QgisAlgorithm):
+
+    INPUT = 'INPUT'
+    RADIUS = 'RADIUS'
+    RADIUS_FIELD = 'RADIUS_FIELD'
+    WEIGHT_FIELD = 'WEIGHT_FIELD'
+    PIXEL_SIZE = 'PIXEL_SIZE'
+    KERNEL = 'KERNEL'
+    DECAY = 'DECAY'
+    OUTPUT_VALUE = 'OUTPUT_VALUE'
+    OUTPUT = 'OUTPUT'
+
+    def icon(self):
+        return QgsApplication.getThemeIcon("/heatmap.svg")
+
+    def tags(self):
+        return self.tr('heatmap,kde,hotspot').split(',')
+
+    def group(self):
+        return self.tr('Interpolation')
+
+    def groupId(self):
+        return 'interpolation'
+
+    def name(self):
+        return 'heatmapkerneldensityestimation'
+
+    def displayName(self):
+        return self.tr('Heatmap (Kernel Density Estimation)')
+
+    def __init__(self):
+        super().__init__()
+
+    def initAlgorithm(self, config=None):
+        self.KERNELS = OrderedDict([(self.tr('Quartic'), QgsKernelDensityEstimation.KernelQuartic),
+                                    (self.tr('Triangular'), QgsKernelDensityEstimation.KernelTriangular),
+                                    (self.tr('Uniform'), QgsKernelDensityEstimation.KernelUniform),
+                                    (self.tr('Triweight'), QgsKernelDensityEstimation.KernelTriweight),
+                                    (self.tr('Epanechnikov'), QgsKernelDensityEstimation.KernelEpanechnikov)])
+
+        self.OUTPUT_VALUES = OrderedDict([(self.tr('Raw'), QgsKernelDensityEstimation.OutputRaw),
+                                          (self.tr('Scaled'), QgsKernelDensityEstimation.OutputScaled)])
+
+        self.addParameter(QgsProcessingParameterFeatureSource(self.INPUT,
+                                                              self.tr('Point layer'),
+                                                              [QgsProcessing.TypeVectorPoint]))
+
+        self.addParameter(QgsProcessingParameterNumber(self.RADIUS,
+                                                       self.tr('Radius (layer units)'),
+                                                       QgsProcessingParameterNumber.Double,
+                                                       100.0, False, 0.0, 9999999999.99))
+
+        radius_field_param = QgsProcessingParameterField(self.RADIUS_FIELD,
+                                                         self.tr('Radius from field'),
+                                                         None,
+                                                         self.INPUT,
+                                                         QgsProcessingParameterField.Numeric,
+                                                         optional=True
+                                                         )
+        radius_field_param.setFlags(radius_field_param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(radius_field_param)
+
+        class ParameterHeatmapPixelSize(QgsProcessingParameterNumber):
+
+            def __init__(self, name='', description='', parent_layer=None, radius_param=None, radius_field_param=None, minValue=None, maxValue=None,
+                         default=None, optional=False):
+                QgsProcessingParameterNumber.__init__(self, name, description, QgsProcessingParameterNumber.Double, default, optional, minValue, maxValue)
+                self.parent_layer = parent_layer
+                self.radius_param = radius_param
+                self.radius_field_param = radius_field_param
+
+            def clone(self):
+                copy = ParameterHeatmapPixelSize(self.name(), self.description(), self.parent_layer, self.radius_param, self.radius_field_param, self.minimum(), self.maximum(), self.defaultValue((), self.flags() & QgsProcessingParameterDefinition.FlagOptional))
+                return copy
+
+        pixel_size_param = ParameterHeatmapPixelSize(self.PIXEL_SIZE,
+                                                     self.tr('Output raster size'),
+                                                     parent_layer=self.INPUT,
+                                                     radius_param=self.RADIUS,
+                                                     radius_field_param=self.RADIUS_FIELD,
+                                                     minValue=0.0,
+                                                     maxValue=9999999999,
+                                                     default=0.1)
+        pixel_size_param.setMetadata({
+            'widget_wrapper': {
+                'class': 'processing.algs.qgis.ui.HeatmapWidgets.HeatmapPixelSizeWidgetWrapper'}})
+        self.addParameter(pixel_size_param)
+
+        weight_field_param = QgsProcessingParameterField(self.WEIGHT_FIELD,
+                                                         self.tr('Weight from field'),
+                                                         None,
+                                                         self.INPUT,
+                                                         QgsProcessingParameterField.Numeric,
+                                                         optional=True
+                                                         )
+        weight_field_param.setFlags(weight_field_param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(weight_field_param)
+
+        keys = list(self.KERNELS.keys())
+        kernel_shape_param = QgsProcessingParameterEnum(self.KERNEL,
+                                                        self.tr('Kernel shape'),
+                                                        keys,
+                                                        allowMultiple=False,
+                                                        defaultValue=0)
+        kernel_shape_param.setFlags(kernel_shape_param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(kernel_shape_param)
+
+        decay_ratio = QgsProcessingParameterNumber(self.DECAY,
+                                                   self.tr('Decay ratio (Triangular kernels only)'),
+                                                   QgsProcessingParameterNumber.Double,
+                                                   0.0, True, -100.0, 100.0)
+        decay_ratio.setFlags(decay_ratio.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(decay_ratio)
+
+        keys = list(self.OUTPUT_VALUES.keys())
+        output_scaling = QgsProcessingParameterEnum(self.OUTPUT_VALUE,
+                                                    self.tr('Output value scaling'),
+                                                    keys,
+                                                    allowMultiple=False,
+                                                    defaultValue=0)
+        output_scaling.setFlags(output_scaling.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(output_scaling)
+
+        self.addParameter(QgsProcessingParameterRasterDestination(self.OUTPUT, self.tr('Heatmap')))
+
+    def processAlgorithm(self, parameters, context, feedback):
+        source = self.parameterAsSource(parameters, self.INPUT, context)
+
+        radius = self.parameterAsDouble(parameters, self.RADIUS, context)
+        kernel_shape = self.parameterAsEnum(parameters, self.KERNEL, context)
+        pixel_size = self.parameterAsDouble(parameters, self.PIXEL_SIZE, context)
+        decay = self.parameterAsDouble(parameters, self.DECAY, context)
+        output_values = self.parameterAsEnum(parameters, self.OUTPUT_VALUE, context)
+        outputFile = self.parameterAsOutputLayer(parameters, self.OUTPUT, context)
+        output_format = QgsRasterFileWriter.driverForExtension(os.path.splitext(outputFile)[1])
+        weight_field = self.parameterAsString(parameters, self.WEIGHT_FIELD, context)
+        radius_field = self.parameterAsString(parameters, self.RADIUS_FIELD, context)
+
+        attrs = []
+
+        kde_params = QgsKernelDensityEstimation.Parameters()
+        kde_params.source = source
+        kde_params.radius = radius
+        kde_params.pixelSize = pixel_size
+        # radius field
+        if radius_field:
+            kde_params.radiusField = radius_field
+            attrs.append(source.fields().lookupField(radius_field))
+        # weight field
+        if weight_field:
+            kde_params.weightField = weight_field
+            attrs.append(source.fields().lookupField(weight_field))
+
+        kde_params.shape = kernel_shape
+        kde_params.decayRatio = decay
+        kde_params.outputValues = output_values
+
+        kde = QgsKernelDensityEstimation(kde_params, outputFile, output_format)
+
+        if kde.prepare() != QgsKernelDensityEstimation.Success:
+            raise QgsProcessingException(
+                self.tr('Could not create destination layer'))
+
+        request = QgsFeatureRequest()
+        request.setSubsetOfAttributes(attrs)
+        features = source.getFeatures(request)
+        total = 100.0 / source.featureCount() if source.featureCount() else 0
+        for current, f in enumerate(features):
+            if feedback.isCanceled():
+                break
+
+            if kde.addFeature(f) != QgsKernelDensityEstimation.Success:
+                feedback.reportError(self.tr('Error adding feature with ID {} to heatmap').format(f.id()))
+
+            feedback.setProgress(int(current * total))
+
+        if kde.finalise() != QgsKernelDensityEstimation.Success:
+            raise QgsProcessingException(
+                self.tr('Could not save destination layer'))
+
+        return {self.OUTPUT: outputFile}
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+import os
+import re
+import errno
+import datetime
+
+
+def listdir(dirname):
+    """Prefer empty list to OSError on os.listdir
+
+    Example:
+        >>> listdir("/definitely/does/not/exist")
+        []
+        >>> listdir(os.path.expanduser("~")) != []
+        True
+
+    """
+
+    try:
+        return os.listdir(dirname)
+    except OSError as e:
+        # Only handle missing directories
+        if e.errno == errno.ENOENT:  # No such file or directory
+            return list()
+        raise
+
+
+def time():
+    """Return file-system safe string of current date and time"""
+    return datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")
+
+
+def format_shared_dir(root):
+    return os.path.join(root, "shared")
+
+
+def format_staging_dir(root, name):
+    dirname = os.path.join(root, "stage", time(), name)
+    return dirname
+
+
+def parse_version(version):
+    """Return integer version from formatted string
+
+    Returns:
+        integer version number
+
+    Raises:
+        ValueError when integer could not be found
+
+    Example:
+        >>> parse_version("v001")
+        1
+        >>> parse_version("2")
+        2
+        >>> parse_version("version03")
+        3
+        >>> parse_version("000008")
+        8
+        >>> parse_version("abc")
+        Traceback (most recent call last):
+        ...
+        ValueError: Could not parse "abc"
+
+    """
+
+    matches = re.findall(r"\d+", version)
+
+    if not matches:
+        raise ValueError("Could not parse \"%s\"" % version)
+
+    return int(matches[-1])
+
+
+def format_version(version):
+    """Produce filesystem-friendly string from integer version
+
+    Arguments:
+        version (int): Version number
+
+    Returns:
+        string of `version`.
+
+    Raises:
+        TypeError on non-integer version
+
+    Example:
+        >>> format_version(5)
+        'v005'
+        >>> format_version("x")
+        Traceback (most recent call last):
+        ...
+        TypeError: %d format: a number is required, not str
+
+    """
+
+    return "v%03d" % version
+
+
+def find_latest_version(versions):
+    """Return latest version from list of versions
+
+    If multiple numbers are found in a single version,
+    the last one found is used. E.g. (6) from "v7_22_6"
+
+    Arguments:
+        versions (list): Version numbers as string
+
+    Example:
+        >>> find_latest_version(["v001", "v002", "v003"])
+        3
+        >>> find_latest_version(["1", "2", "3"])
+        3
+        >>> find_latest_version(["v1", "v0002", "verision_3"])
+        3
+        >>> find_latest_version(["v2", "5_version", "verision_8"])
+        8
+        >>> find_latest_version(["v2", "v3_5", "_1_2_3", "7, 4"])
+        5
+        >>> find_latest_version(["v010", "v011"])
+        11
+
+    """
+
+    highest_version = 0
+    for version in versions:
+        version = parse_version(version)
+
+        if version > highest_version:
+            highest_version = version
+
+    return highest_version
+

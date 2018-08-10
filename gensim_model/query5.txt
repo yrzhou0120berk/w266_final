@@ -1,0 +1,1294 @@
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# Copyright (c) 2010-2017 LE GOFF Vincent
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+# * Neither the name of the copyright holder nor the names of its contributors
+#   may be used to endorse or promote products derived from this software
+#   without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+# OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+
+"""Fichier contenant le paramètre 'ejecter' de la commande 'canaux'."""
+
+from primaires.interpreteur.masque.parametre import Parametre
+
+class PrmEjecter(Parametre):
+    
+    """Commande 'canaux ejecter <canal> <joueur>'.
+    
+    """
+    
+    def __init__(self):
+        """Constructeur du paramètre"""
+        Parametre.__init__(self, "ejecter", "eject")
+        self.schema = "<canal> <nom_joueur>"
+        self.aide_courte = "éjecte un joueur"
+        self.aide_longue = \
+            "Cette sous-commande permet d'éjecter un joueur. Il peut " \
+            "néanmoins se reconnecter par la suite."
+    
+    def interpreter(self, personnage, dic_masques):
+        """Interprétation du paramètre"""
+        if not dic_masques["canal"].canal_existe:
+            personnage << "|err|Vous n'êtes pas connecté à ce canal.|ff|"
+        else:
+            canal = dic_masques["canal"].canal
+            joueur = dic_masques["nom_joueur"].joueur
+            if not personnage in canal.moderateurs and \
+                    personnage is not canal.auteur and not \
+                    personnage.est_immortel():
+                personnage << "|err|Vous n'avez pas accès à cette option.|ff|"
+            elif not personnage in canal.connectes:
+                personnage << "|err|Vous n'êtes pas connecté à ce canal.|ff|"
+            elif not joueur in canal.connectes:
+                personnage << "|err|Ce joueur n'est pas connecté au " \
+                        "canal.|ff|"
+            elif joueur is personnage:
+                personnage << "|err|Vous ne pouvez vous éjecter " \
+                        "vous-même.|ff|"
+            elif joueur in canal.moderateurs or joueur is canal.auteur:
+                personnage << "|err|Vous ne pouvez éjecter ce joueur.|ff|"
+            else:
+                canal.ejecter(joueur)
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+import KBEngine
+import KBExtra
+import kbesystem
+from KBEDebug import *
+
+class TargetMgr:
+	def __init__(self):
+		self._currTargetID = 0
+		self._preTargetID = 0
+		
+	def entity(self):
+		"""
+		获得entity
+		"""
+		return KBEngine.entities.get(self._currTargetID)
+		
+	def targetID(self):
+		return self._currTargetID
+
+	def preTargetID(self):
+		return self._preTargetID
+		
+	def setTargetID(self, entityID):
+		self._preTargetID = self._currTargetID
+		self._currTargetID = entityID
+		self.onTargetChanged()
+		
+	def onTargetChanged(self):
+		kbesystem.eventMgr.fire("TargetMgr.onTargetChanged", self._preTargetID, self._currTargetID)
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# -*- coding:utf-8 -*-
+
+# Copyright (c) 2013, Theo Crevon
+# Copyright (c) 2013, Greg Leclercq
+#
+# See the file LICENSE for copying permission.
+
+import collections
+
+from swf.models.event.workflow import (
+    WorkflowExecutionEvent,
+    CompiledWorkflowExecutionEvent,
+    ChildWorkflowExecutionEvent,
+    CompiledChildWorkflowExecutionEvent,
+    ExternalWorkflowExecutionEvent,
+    CompiledExternalWorkflowExecutionEvent
+)
+
+from swf.models.event.task import (
+    DecisionTaskEvent,
+    CompiledDecisionTaskEvent,
+    ActivityTaskEvent,
+    CompiledActivityTaskEvent
+)
+
+from swf.models.event.timer import (
+    TimerEvent,
+    CompiledTimerEvent
+)
+
+from swf.models.event.marker import (
+    MarkerEvent,
+    CompiledMarkerEvent
+)
+
+from swf.utils import camel_to_underscore, decapitalize
+
+
+EVENTS = collections.OrderedDict([
+    # At top-level to override 'WorkflowExecution'
+    ('ChildWorkflowExecution', {
+        'event': ChildWorkflowExecutionEvent,
+        'compiled': CompiledChildWorkflowExecutionEvent,
+    }),
+    ('ExternalWorkflow', {
+        'event': ExternalWorkflowExecutionEvent,
+        'compiled': CompiledExternalWorkflowExecutionEvent,
+    }),
+    ('WorkflowExecution', {
+        'event': WorkflowExecutionEvent,
+        'compiled_event': CompiledWorkflowExecutionEvent,
+    }),
+    ('DecisionTask', {
+        'event': DecisionTaskEvent,
+        'compiled_event': CompiledDecisionTaskEvent,
+    }),
+    ('ActivityTask', {
+        'event': ActivityTaskEvent,
+        'compiled_event': CompiledActivityTaskEvent,
+    }),
+    ('Marker', {
+        'event': MarkerEvent,
+        'compiled': CompiledMarkerEvent,
+    }),
+    ('Timer', {
+        'event': TimerEvent,
+        'compiled': CompiledTimerEvent,
+    }),
+])
+
+
+class EventFactory(object):
+    """Processes an input json event representation, and instantiates
+    an ``swf.models.event.Event`` subclass instance accordingly.
+
+    The input:
+
+    .. code-block:: json
+
+        {
+            'eventId': 1,
+            'eventType': 'DecisionTaskScheduled',
+            'decisionTaskScheduledEventAttributes': {
+                'startToCloseTimeout': '300',
+                'taskList': {
+                    'name': 'test'
+                }
+            },
+            'eventTimestamp': 1365177769.585
+        }
+
+    will instantiate a ``swf.models.event.task.DecisionTaskEvent`` with state
+    set to 'scheduled' from input attributes.
+
+    :param  raw_event: The input json event representation provided by
+                       amazon service
+    :type   raw_event: dict
+
+    :returns: ``swf.models.event.Event`` subclass instance
+    """
+
+    # eventType to Event subclass bindings
+    events = EVENTS
+
+    def __new__(klass, raw_event):
+        event_id = raw_event['eventId']
+        event_name = raw_event['eventType']
+        event_timestamp = raw_event['eventTimestamp']
+
+        event_type = klass._extract_event_type(event_name)
+        event_state = klass._extract_event_state(event_type, event_name)
+        # amazon swf format is not very normalized and event attributes
+        # response field is non-capitalized...
+        event_attributes_key = decapitalize(event_name) + 'EventAttributes'
+
+        klass = EventFactory.events[event_type]['event']
+        klass._name = event_name
+        klass._attributes_key = event_attributes_key
+
+        instance = klass(
+            id=event_id,
+            state=event_state,
+            timestamp=event_timestamp,
+            raw_data=raw_event
+        )
+
+        return instance
+
+    @classmethod
+    def _extract_event_type(klass, event_name):
+        """Extracts event type from raw event_name
+
+        :param  event_name:
+
+        Example:
+
+            with event_name = 'StartChildWorkflowExecutionInitiated'
+
+        Returns:
+
+            'ChildWorkflowExecution'
+
+        """
+        for name in klass.events:
+            if name in event_name:
+                return name
+        return
+
+    @classmethod
+    def _extract_event_state(klass, event_type, event_name):
+        """Extracts event state from raw event type and name
+
+        Example:
+
+            With event_name = 'StartChildWorkflowExecutionInitiated'
+             and event_type = 'ChildWorkflowExecution'
+            left == 'Start'
+            sep == 'ChildWorkflowExecution'
+            right == 'Initiated'
+
+            Returns: 'start_initiated'
+
+        """
+        left, sep, right = event_name.partition(event_type)
+        return camel_to_underscore(left + right)
+
+
+class CompiledEventFactory(object):
+    """
+    Process an Event object and instantiates the corresponding
+    swf.models.event.compiler.CompiledEvent.
+    """
+    events = EVENTS
+
+    def __new__(cls, event):
+        event_type = event.type
+
+        klass = cls.events[event_type]['compiled_event']
+        instance = klass(event)
+
+        return instance
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Update encrypted deploy password in Travis config file
+"""
+
+
+from __future__ import print_function
+import base64
+import json
+import os
+from getpass import getpass
+import yaml
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+
+
+try:
+    from urllib import urlopen
+except:
+    from urllib.request import urlopen
+
+
+GITHUB_REPO = 'drupchen/pytib'
+TRAVIS_CONFIG_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '.travis.yml')
+
+
+def load_key(pubkey):
+    """Load public RSA key, with work-around for keys using
+    incorrect header/footer format.
+
+    Read more about RSA encryption with cryptography:
+    https://cryptography.io/latest/hazmat/primitives/asymmetric/rsa/
+    """
+    try:
+        return load_pem_public_key(pubkey.encode(), default_backend())
+    except ValueError:
+        # workaround for https://github.com/travis-ci/travis-api/issues/196
+        pubkey = pubkey.replace('BEGIN RSA', 'BEGIN').replace('END RSA', 'END')
+        return load_pem_public_key(pubkey.encode(), default_backend())
+
+
+def encrypt(pubkey, password):
+    """Encrypt password using given RSA public key and encode it with base64.
+
+    The encrypted password can only be decrypted by someone with the
+    private key (in this case, only Travis).
+    """
+    key = load_key(pubkey)
+    encrypted_password = key.encrypt(password, PKCS1v15())
+    return base64.b64encode(encrypted_password)
+
+
+def fetch_public_key(repo):
+    """Download RSA public key Travis will use for this repo.
+
+    Travis API docs: http://docs.travis-ci.com/api/#repository-keys
+    """
+    keyurl = 'https://api.travis-ci.org/repos/{0}/key'.format(repo)
+    data = json.loads(urlopen(keyurl).read().decode())
+    if 'key' not in data:
+        errmsg = "Could not find public key for repo: {}.\n".format(repo)
+        errmsg += "Have you already added your GitHub repo to Travis?"
+        raise ValueError(errmsg)
+    return data['key']
+
+
+def prepend_line(filepath, line):
+    """Rewrite a file adding a line to its beginning.
+    """
+    with open(filepath) as f:
+        lines = f.readlines()
+
+    lines.insert(0, line)
+
+    with open(filepath, 'w') as f:
+        f.writelines(lines)
+
+
+def load_yaml_config(filepath):
+    with open(filepath) as f:
+        return yaml.load(f)
+
+
+def save_yaml_config(filepath, config):
+    with open(filepath, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+
+def update_travis_deploy_password(encrypted_password):
+    """Update the deploy section of the .travis.yml file
+    to use the given encrypted password.
+    """
+    config = load_yaml_config(TRAVIS_CONFIG_FILE)
+
+    config['deploy']['password'] = dict(secure=encrypted_password)
+
+    save_yaml_config(TRAVIS_CONFIG_FILE, config)
+
+    line = ('# This file was autogenerated and will overwrite'
+            ' each time you run travis_pypi_setup.py\n')
+    prepend_line(TRAVIS_CONFIG_FILE, line)
+
+
+def main(args):
+    public_key = fetch_public_key(args.repo)
+    password = args.password or getpass('PyPI password: ')
+    update_travis_deploy_password(encrypt(public_key, password.encode()))
+    print("Wrote encrypted password to .travis.yml -- you're ready to deploy")
+
+
+if '__main__' == __name__:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo', default=GITHUB_REPO,
+                        help='GitHub repo (default: %s)' % GITHUB_REPO)
+    parser.add_argument('--password',
+                        help='PyPI password (will prompt if not provided)')
+
+    args = parser.parse_args()
+    main(args)
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+# Copyright (c) 2015-17 Ericsson AB
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# encoding: utf-8
+
+from calvin.actor.actor import Actor, manage, condition, calvinlib
+
+
+class BasicAuthHeader(Actor):
+    """
+    Generate Basic Authorization header from username/password
+
+    Inputs:
+      credential: JSon with values for "username" and "password"
+    Outputs:
+      header : Authorization header
+    """
+
+    @manage()
+    def init(self):
+        self.setup()
+
+    def did_migrate(self):
+        self.setup()
+
+    def setup(self):
+        self.base64 = calvinlib.use('base64')
+
+    @condition(['credential'], ['header'])
+    def authorization_header(self, credential):
+        auth = "Basic " + self.base64.encode("%s:%s" % (credential['username'], credential['password']))
+        header = {'Authorization': auth}
+        return (header,)
+
+    action_priority = (authorization_header,)
+    requires = ['base64']
+
+
+    test_set = [
+        {
+            'inports': {'credential': [{"username": "root", "password": "pass"}]},
+            'outports': {'header': [{"Authorization": "Basic cm9vdDpwYXNz"}]}
+        }
+    ]
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import json
+import operator
+import os
+import re
+import shutil
+import subprocess as sp
+from collections import OrderedDict
+from fractions import Fraction
+from functools import wraps
+
+from typing import List, Callable, Any, Type
+
+import decorator
+
+from mugen.constants import TIME_FORMAT, Color
+from mugen.exceptions import ParameterError
+import mugen.exceptions as ex
+import mugen.paths as paths
+
+
+""" SYSTEM """
+
+
+def touch(filename):
+    """
+    Creates an empty file if it does not already exist
+    """
+    open(filename, 'a').close()
+
+
+def which(executable):
+    """
+    Checks if an executable exists
+    (Mimics behavior of UNIX which command)
+    """
+    envdir_list = [os.curdir] + os.environ["PATH"].split(os.pathsep)
+
+    for envdir in envdir_list:
+        executable_path = os.path.join(envdir, executable)
+        if os.path.isfile(executable_path) and os.access(executable_path, os.X_OK):
+            return executable_path
+
+
+def get_ffmpeg_binary():
+    """
+    Returns appropriate ffmpeg binary for current system
+    """
+    # Unix
+    if which("ffmpeg"):
+        return "ffmpeg"
+    # Windows
+    elif which("ffmpeg.exe"):
+        return "ffmpeg.exe"
+    else:
+        raise IOError("Could not find ffmpeg binary for system.")
+
+
+def execute_ffmpeg_command(cmd):
+    """
+    Executes an ffmpeg command
+    """
+    p = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE)
+    p_out, p_err = p.communicate()
+
+    if p.returncode != 0:
+        raise ex.FFMPEGError(f"Error executing ffmpeg command. Error code: {p.returncode}, Error: {p_err}",
+                             p.returncode, p_out, p_err)
+
+
+""" FILESYSTEM  """
+
+
+def ensure_dir(*directories):
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+
+def recreate_dir(*directories):
+    for directory in directories:
+        if os.path.exists(directory):
+            shutil.rmtree(directory)
+        os.makedirs(directory)
+
+
+def delete_dir(*directories):
+    for directory in directories:
+        if os.path.exists(directory):
+            shutil.rmtree(directory)
+
+
+def listdir_nohidden(path):
+    for file in os.listdir(path):
+        if not file.startswith('.'):
+            yield os.path.join(path, file)
+
+
+def files_from_directory(directory: str) -> List[str]:
+    """
+    Returns
+    -------
+    A list of all video files found in the directory
+    """
+    return [item for item in listdir_nohidden(directory) if os.path.isfile(item)]
+
+
+def directories_from_directory(directory: str) -> List[str]:
+    """
+    Returns
+    -------
+    A list of all directories found in the directory
+    """
+    return [item for item in listdir_nohidden(directory) if os.path.isdir(item)]
+
+
+def parse_json_file(json_file: str) -> dict:
+    with open(json_file) as json_file:
+        json_content = json.load(json_file, object_pairs_hook=OrderedDict)
+
+    return json_content
+
+
+""" MISC """
+
+
+def window(iterable, size):
+    i = iter(iterable)
+    win = []
+    for e in range(0, size):
+        win.append(next(i))
+    yield win
+    for e in i:
+        win = win[1:] + [e]
+        yield win
+
+
+def ranges_overlap(a_start, a_end, b_start, b_end) -> bool:
+    return max(a_start, b_start) < min(a_end, b_end)
+
+
+def float_to_fraction(float_var: float) -> Fraction:
+    return Fraction(float_var).limit_denominator()
+
+
+def fill_slices(slices: List[slice], length) -> List[slice]:
+    """
+    Completes the list of slices for a list, given a list of slices and the list's length.
+    """
+    all_slices = []
+
+    # Sort by start element
+    slices_sorted = sorted(slices, key=operator.attrgetter('start'))
+
+    # If any ranges overlap, throw an error
+    for index, sl in enumerate(slices_sorted):
+        if index == len(slices_sorted) - 1:
+            continue
+
+        next_sl = slices_sorted[index + 1]
+        if ranges_overlap(sl.start, sl.stop, next_sl.start, next_sl.stop):
+            raise ParameterError(f"Slice ranges may not overlap. "
+                                 f"Found overlapping slices {sl}, {next_sl}.")
+
+    for index, sl in enumerate(slices_sorted):
+        if index == 0:
+            if 0 < sl.start:
+                first_sl = slice(0, sl.start)
+                all_slices.insert(0, first_sl)
+
+        all_slices.append(sl)
+
+        if index == len(slices_sorted) - 1:
+            if sl.stop < length:
+                last_sl = slice(sl.stop, length)
+                all_slices.append(last_sl)
+            continue
+
+        next_sl = slices_sorted[index + 1]
+        if sl.stop < next_sl.start:
+            new_sl = slice(sl.stop, next_sl.start)
+            all_slices.append(new_sl)
+
+    return all_slices
+
+
+def time_to_seconds(time: TIME_FORMAT) -> float:
+    """ 
+    Convert any time into seconds.
+    """
+
+    if isinstance(time, str):
+        expr = r"(?:(?:(\d+):)?(?:(\d+):))?(\d+)?(?:[,|.](\d+))?"
+        finds = re.findall(expr, time)[0]
+        finds = [find if find else '0' for find in finds]
+
+        seconds = (3600*int(finds[0]) +
+                   60*int(finds[1]) +
+                   int(finds[2]) +
+                   int(finds[3])/(10**len(finds[3])))
+    elif isinstance(time, tuple):
+        if len(time) == 3:
+            hr, mn, sec = time
+        elif len(time) == 2:
+            hr, mn, sec = 0, time[0], time[1]
+        else:
+            raise ParameterError(f"Unsupported number of elements in tuple {time}")
+        seconds = (3600 * hr) + (60 * mn) + sec
+    else:
+        seconds = time
+
+    return seconds
+
+
+def time_list_to_seconds(times: List[TIME_FORMAT]) -> List[float]:
+    return [time_to_seconds(time) for time in times]
+
+
+def seconds_to_time_code(seconds: float) -> str:
+    ms = 1000 * round(seconds - int(seconds), 3)
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    return "%02d:%02d:%02d.%03d" % (h, m, s, ms)
+
+
+def hex_to_rgb(hex_value) -> List[int]:
+    """Return [red, green, blue] for the color given as #rrggbb."""
+    hex_value = hex_value.lstrip('#')
+    len_hex_value = len(hex_value)
+    return [int(hex_value[i:i + len_hex_value // 3], 16) for i in range(0, len_hex_value, len_hex_value // 3)]
+
+
+def color_to_hex_code(color):
+    if color.startswith('#'):
+        return color
+    else:
+        return Color(color).hex_code()
+
+
+def list_to_subclass(l: List[Any], subclass: Type[list]):
+    return subclass(l)
+
+
+""" DECORATORS """
+
+
+def preprocess_args(fun: Callable, varnames: List[str]):
+    """ 
+    Applies fun to variables in varnames before launching the function 
+    """
+    def wrapper(f, *a, **kw):
+        func_code = f.__code__
+
+        names = func_code.co_varnames
+        new_a = [fun(arg) if (name in varnames) else arg
+                 for (arg, name) in zip(a, names)]
+        new_kw = {k: fun(v) if k in varnames else v
+                  for (k, v) in kw.items()}
+        return f(*new_a, **new_kw)
+
+    return decorator.decorator(wrapper)
+
+
+def convert_float_to_fraction(*varnames: str):
+    """
+    Decorator to convert varnames from floats to fractions
+    """
+    return preprocess_args(float_to_fraction, *varnames)
+
+
+def convert_time_to_seconds(*varnames: str):
+    """
+    Decorator to convert varnames from TIME_FORMAT to seconds
+    """
+    return preprocess_args(time_to_seconds, *varnames)
+
+
+def convert_color_to_hex_code(*varnames: str):
+    """
+    Decorator to convert varnames to hex color format
+    """
+    return preprocess_args(color_to_hex_code, *varnames)
+
+
+def convert_time_list_to_seconds(*varnames: str):
+    """
+    Decorator to convert varnames from TIME_FORMAT to seconds
+    """
+    return preprocess_args(time_list_to_seconds, *varnames)
+
+
+def convert_list_to_subclass(*varnames: str, subclass: Type[list]):
+    return preprocess_args(lambda x: list_to_subclass(x, subclass=subclass), *varnames)
+
+
+def temp_file_enabled(path_var: str, extension: str):
+    """
+    Decorator to set path_var to a temporary file path if it is None. Does not create the file.
+    
+    Parameters
+    ----------
+    path_var
+        A variable expecting a file path
+        
+    extension
+        extension for the temporary file
+    """
+    def _use_temp_file_path(path_variable):
+        return path_variable or paths.generate_temp_file_path(extension)
+
+    return preprocess_args(_use_temp_file_path, [path_var])
+
+
+def ensure_json_serializable(*dicts: dict):
+    """
+    Decorator ensures dicts are json serializable
+    """
+    def _ensure_json_serializable(dictionary):
+        try:
+            json.dumps(dictionary)
+        except TypeError as e:
+            print(f"{dictionary} is not json serializable. Error: {e}")
+            raise
+
+        return dictionary
+
+    return preprocess_args(_ensure_json_serializable, *dicts)
+
+
+def validate_speed_multiplier(func):
+    """
+    Decorator validates speed multiplier and speed_multiplier_offset values
+    """
+
+    @wraps(func)
+    def _validate_speed_multiplier(*args, **kwargs):
+        speed_multiplier = kwargs.get('speed_multiplier')
+        speed_multiplier_offset = kwargs.get('speed_multiplier_offset')
+
+        if speed_multiplier:
+            speed_multiplier = Fraction(speed_multiplier).limit_denominator()
+            if speed_multiplier == 0 or (speed_multiplier.numerator != 1 and speed_multiplier.denominator != 1):
+                raise ValueError(f"""Improper speed multiplier {speed_multiplier}. 
+                                     Speed multipliers must be of the form x or 1/x, where x is a natural number.""")
+
+        if speed_multiplier_offset:
+            if speed_multiplier >= 1:
+                raise ValueError(f"""Improper speed multiplier offset {speed_multiplier_offset} for speed multiplier
+                                     {speed_multiplier}. Speed multiplier offsets may only be used with slowdown speed
+                                     multipliers.""")
+            elif speed_multiplier_offset > speed_multiplier.denominator - 1:
+                raise ValueError(f"""Improper speed multiplier offset {speed_multiplier_offset} for speed multiplier
+                                     {speed_multiplier}. Speed multiplier offset may not be greater than x - 1 for a 
+                                     slowdown of 1/x.""")
+
+        return func(*args, **kwargs)
+
+    return _validate_speed_multiplier
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# instance configs
+PRIMARY_OS = 'Ubuntu-16.04'
+PRIMARY = '''#!/bin/sh
+
+FQDN="{fqdn}"
+
+export DEBIAN_FRONTEND=noninteractive
+
+# locale
+sudo locale-gen en_US.UTF-8
+
+# hostname
+hostnamectl set-hostname $FQDN
+sed -i "1 c\\127.0.0.1 $FQDN localhost" /etc/hosts
+
+# required packages
+apt-get update
+apt-get install -y -q slapd ldap-utils phpldapadmin
+
+# config files - temp solution
+curl -sSL https://gist.githubusercontent.com/kizbitz/f2e10ccdbf9db4bbbe7262d9e5fc09ff/raw/af233a12e78851399e1d7e8ea8bc2758bcea6f0a/docker-ldap-training-configs.sh | sh
+
+# final prep
+chown root:www-data /etc/phpldapadmin/config.php
+rm -r /var/lib/ldap/*
+rm -r /etc/ldap/slapd.d/*
+slapadd -F /etc/ldap/slapd.d -b cn=config -l /tmp/config.ldif
+slapadd -l /tmp/data.ldif
+chown -R openldap:openldap /etc/ldap/slapd.d
+chown -R openldap:openldap /var/lib/ldap
+
+service slapd restart
+service apache2 restart
+
+{dinfo}
+'''
+
+# Script to use if launching from a custom lab AMI image
+AMIBUILD = '''#!/bin/sh
+
+FQDN="{fqdn}"
+
+# hostname
+hostnamectl set-hostname $FQDN
+sed -i "1 c\\127.0.0.1 $FQDN localhost" /etc/hosts
+
+{dinfo}
+reboot
+'''
+
+
+def pre_process():
+    """Executed before launching instances in AWS"""
+    pass
+
+def post_process():
+    """Executed after launching instances in AWS"""
+    pass
+
+
+# Notes
+'''
+Script requires:
+    {fqdn}
+    {dinfo}
+'''
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# -*- encoding: utf-8 -*-
+import json
+import logging
+
+import click
+
+from sklearn.externals import joblib
+
+from strephit.commons.classification import apply_custom_classification_rules, reverse_gazetteer
+from strephit.commons import parallel
+
+logger = logging.getLogger(__name__)
+
+
+class SentenceClassifier:
+    """ Supervised Sentence classifier
+    """
+
+    def __init__(self, model, extractor, language, gazetteer):
+        self.model = model
+        self.language = language
+        self.extractor = extractor
+        self.gazetteer = gazetteer
+
+    def classify_sentences(self, sentences):
+        """ Classify the given sentences
+
+            :param list sentences: sentences to be classified. Each one
+             should be a dict with a `text`, a source `url` and some `linked_entities`
+            :return: Classified sentences with the recognized `fes`
+            :rtype: generator of dicts
+        """
+        self.extractor.start()
+
+        sentences_data = []
+        for data in sentences:
+            if 'url' not in data:
+                logger.warn('found a sentence with no URL (row number %d), skipping it')
+                continue
+
+            entities = dict(enumerate(e['chunk'] for e in data.get('linked_entities', [])))
+            tagged = self.extractor.process_sentence(
+                data['text'], data['lu'], entities, add_unknown=False, gazetteer=self.gazetteer
+            )
+
+            data['tagged'] = tagged
+            sentences_data.append(data)
+
+        features, _ = self.extractor.get_features(refit=False)
+        y = self.model.predict(features)
+
+        token_offset = 0
+        role_label_to_index = self.extractor.label_index
+        role_index_to_label = {v: k for k, v in self.extractor.label_index.iteritems()}
+
+        for data in sentences_data:
+            fes = []
+            chunk_to_entity = {entity['chunk']: entity for entity in data.get('linked_entities', [])}
+            for chunk, is_sample in data['tagged']:
+                if not is_sample:
+                    continue
+
+                predicted_role = y[token_offset]
+                if predicted_role != role_label_to_index['O']:
+                    label = role_index_to_label[predicted_role]
+                    logger.debug('chunk "%s" classified as "%s"', chunk, label)
+                    fe = {
+                        'chunk': chunk,
+                        'fe': label,
+                    }
+                    if chunk in chunk_to_entity:
+                        fe['link'] = chunk_to_entity[chunk]
+
+                    fes.append(fe)
+
+                token_offset += 1
+
+            logger.debug('found %d FEs in sentence "%s"', len(fes), data['text'])
+            if fes:
+                classified = {
+                    'lu': data['lu'],
+                    'name': data['name'],
+                    'url': data['url'],
+                    'text': data['text'],
+                    'linked_entities': data.get('linked_entities', []),
+                    'fes': fes,
+                }
+
+                final = apply_custom_classification_rules(classified, self.language)
+                yield final
+
+        assert token_offset == len(y), 'processed %d tokens, classified %d' % (token_offset, len(y))
+
+
+@click.command()
+@click.argument('sentences', type=click.File('r'))
+@click.argument('model', type=click.Path(dir_okay=False, writable=False))
+@click.argument('language')
+@click.option('--outfile', '-o', type=click.File('w'), default='output/supervised_classified.jsonlines')
+@click.option('--processes', '-p', default=0)
+@click.option('--gazetteer', type=click.File('r'))
+def main(sentences, model, language, outfile, processes, gazetteer):
+    gazetteer = reverse_gazetteer(json.load(gazetteer)) if gazetteer else {}
+
+    logger.info("Loading model from '%s' ...", model)
+    model, extractor_data = joblib.load(model)
+
+    extractor = extractor_data['extractor']
+    classifier = SentenceClassifier(model, extractor, language, gazetteer)
+
+    def worker(batch):
+        data = (json.loads(s) for s in batch)
+        for classified in classifier.classify_sentences(data):
+            yield json.dumps(classified)
+
+    logger.info('Starting classification')
+    count = 0
+    for each in parallel.map(worker, sentences, batch_size=100,
+                             flatten=True, processes=processes):
+        outfile.write(each)
+        outfile.write('\n')
+
+        count += 1
+        if count % 1000 == 0:
+            logger.info('Classified %d sentences', count)
+
+    logger.info('Done, classified %d sentences', count)
+    if count > 0:
+        logger.info("Dumped classified sentences to '%s'", outfile.name)
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import ply.lex as lex
+import sys
+
+# Palabras Reservadas de JavaScript
+reserved = (
+    'var',
+    'int',
+    'chars',
+    'bool',
+    'function',
+    'write',
+    'prompt',
+    'if',
+    'for',
+    'return'
+)
+
+# Lista de tokens
+tokens = (
+    'END_LINE',
+    'NUMBER',
+    'PLUS',
+    'MINUS',
+    'TIMES',
+    'DIVIDE',
+    'MOD',
+    'ASSIGN',
+    'LPAREN',
+    'RPAREN',
+    'LBLOCK',
+    'RBLOCK',
+    'ID',
+    'COMA',
+    'AOLOGIC',
+    'STRINGS',
+    'EQUALS',
+    'LESS',
+    'GREATER',
+    'LESSTHAN',
+    'GREATERTHAN',
+    'NOASSIG',
+    'YLOGIC',
+    'OLOGIC',
+    'EXCLA'
+) + tuple(map(lambda s:s.upper(),reserved))
+ 
+
+# Operadores Aritmeticos
+t_PLUS = r'\+'
+t_MINUS = r'-'
+t_TIMES = r'\*'
+t_DIVIDE = r'/'
+t_MOD = r'\%'
+
+#Operadores Relacionales
+t_GREATERTHAN = r'>='
+t_LESSTHAN = r'<='
+t_EQUALS = r'=='
+t_NOASSIG = r'!='
+t_LESS = r'<'
+t_GREATER = r'>'
+
+#Operadores Logicos
+t_YLOGIC = r'&&'
+t_OLOGIC = r'\|\|'
+t_EXCLA = r'\!'
+
+t_END_LINE = r';'
+t_ASSIGN = r'='
+t_LPAREN = r'\('
+t_RPAREN = r'\)'
+t_LBLOCK = r'\{'
+t_RBLOCK = r'\}'
+t_COMA = r','
+
+# Asignacion con o logico (Grupo 51)
+t_AOLOGIC = r'\|='
+# Cadena de Caracteres
+t_STRINGS = r'\"([^\\\n]|(\\(.|\n)))*?\"'
+# String que ignora espacios y tabuladores
+t_ignore = ' \t\v'
+# Ignora comentarios de tipo /* */
+t_ignore_COMMENT = r'/\*(.|\n)*?\*/'
+    
+
+def t_NUMBER(t):
+    r'\d+\.?(\d+)?'
+    if eval(t.value) <= 32767 and '.' not in t.value:
+        t.value = eval(t.value)
+        return t
+    else:
+        print ("Lexical: illegal character '%s' in line '%d' position" % (t.value, t.lineno))
+        t.lexer.skip(1)
+ 
+def t_ID(t):
+    r'[a-zA-z_]\w*'
+    if t.value in reserved:
+        t.type = t.value.upper()
+    return t
+ 
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
+ 
+def t_comment(t):
+    r'\//.*'
+    pass
+
+def t_error(t):
+    print ("Lexical: illegal character '%s' in line '%d' position" % (t.value[0], t.lineno))
+    t.lexer.skip(1)
+
+lex.lex()
+
+# MAIN 
+if __name__ == "__main__":
+    f = open(sys.argv[1],'r')
+    datos = f.read()
+    f.close()
+    ftok = open("Output/tokens.txt","w+")
+    lex.input(datos)
+    
+    while 1 :
+    	token = lex.token()
+    	if not token: break
+    	ftok.write(" < " + token.type +" , " + str(token.value) + " > \n")
+    ftok.close()
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+"""Order/create a dedicated Host."""
+# :license: MIT, see LICENSE for more details.
+
+import click
+
+import SoftLayer
+from SoftLayer.CLI import environment
+from SoftLayer.CLI import exceptions
+from SoftLayer.CLI import formatting
+from SoftLayer.CLI import template
+
+
+@click.command(
+    epilog="See 'slcli dedicatedhost create-options' for valid options.")
+@click.option('--hostname', '-H',
+              help="Host portion of the FQDN",
+              required=True,
+              prompt=True)
+@click.option('--router', '-r',
+              help="Router hostname ex. fcr02a.dal13",
+              show_default=True)
+@click.option('--domain', '-D',
+              help="Domain portion of the FQDN",
+              required=True,
+              prompt=True)
+@click.option('--datacenter', '-d', help="Datacenter shortname",
+              required=True,
+              prompt=True)
+@click.option('--flavor', '-f', help="Dedicated Virtual Host flavor",
+              required=True,
+              prompt=True)
+@click.option('--billing',
+              type=click.Choice(['hourly', 'monthly']),
+              default='hourly',
+              show_default=True,
+              help="Billing rate")
+@click.option('--verify',
+              is_flag=True,
+              help="Verify dedicatedhost without creating it.")
+@click.option('--template', '-t',
+              is_eager=True,
+              callback=template.TemplateCallback(list_args=['key']),
+              help="A template file that defaults the command-line options",
+              type=click.Path(exists=True, readable=True, resolve_path=True))
+@click.option('--export',
+              type=click.Path(writable=True, resolve_path=True),
+              help="Exports options to a template file")
+@environment.pass_env
+def cli(env, **kwargs):
+    """Order/create a dedicated host."""
+    mgr = SoftLayer.DedicatedHostManager(env.client)
+
+    order = {
+        'hostname': kwargs['hostname'],
+        'domain': kwargs['domain'],
+        'flavor': kwargs['flavor'],
+        'location': kwargs['datacenter'],
+        'hourly': kwargs.get('billing') == 'hourly',
+    }
+
+    if kwargs['router']:
+        order['router'] = kwargs['router']
+
+    do_create = not (kwargs['export'] or kwargs['verify'])
+
+    output = None
+
+    result = mgr.verify_order(**order)
+    table = formatting.Table(['Item', 'cost'])
+    table.align['Item'] = 'r'
+    table.align['cost'] = 'r'
+    if len(result['prices']) != 1:
+        raise exceptions.ArgumentError("More than 1 price was found or no "
+                                       "prices found")
+    price = result['prices']
+    if order['hourly']:
+        total = float(price[0].get('hourlyRecurringFee', 0.0))
+    else:
+        total = float(price[0].get('recurringFee', 0.0))
+
+    if order['hourly']:
+        table.add_row(['Total hourly cost', "%.2f" % total])
+    else:
+        table.add_row(['Total monthly cost', "%.2f" % total])
+
+    output = []
+    output.append(table)
+    output.append(formatting.FormattedItem(
+        '',
+        ' -- ! Prices reflected here are retail and do not '
+        'take account level discounts and are not guaranteed.'))
+
+    if kwargs['export']:
+        export_file = kwargs.pop('export')
+        template.export_to_template(export_file, kwargs,
+                                    exclude=['wait', 'verify'])
+        env.fout('Successfully exported options to a template file.')
+
+    if do_create:
+        if not env.skip_confirmations and not formatting.confirm(
+                "This action will incur charges on your account. "
+                "Continue?"):
+            raise exceptions.CLIAbort('Aborting dedicated host order.')
+
+        result = mgr.place_order(**order)
+
+        table = formatting.KeyValueTable(['name', 'value'])
+        table.align['name'] = 'r'
+        table.align['value'] = 'l'
+        table.add_row(['id', result['orderId']])
+        table.add_row(['created', result['orderDate']])
+        output.append(table)
+
+    env.fout(output)
+
