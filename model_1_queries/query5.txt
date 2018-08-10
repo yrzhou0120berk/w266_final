@@ -1,0 +1,1151 @@
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import abjad
+
+
+def test_Voice___len___01():
+    """
+    Voice length returns the number of elements in voice.
+    """
+
+    voice = abjad.Voice()
+    assert len(voice) == 0
+
+
+def test_Voice___len___02():
+    """
+    Voice length returns the number of elements in voice.
+    """
+
+    voice = abjad.Voice("c'8 d'8 e'8 f'8")
+    assert len(voice) == 4
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# Copyright 2011, Google Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+#     * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above
+# copyright notice, this list of conditions and the following disclaimer
+# in the documentation and/or other materials provided with the
+# distribution.
+#     * Neither the name of Google Inc. nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+"""Message related utilities.
+
+Note: request.connection.write/read are used in this module, even though
+mod_python document says that they should be used only in connection
+handlers. Unfortunately, we have no other options. For example,
+request.write/read are not suitable because they don't allow direct raw
+bytes writing/reading.
+"""
+
+
+from six.moves import queue
+import threading
+
+
+# Export Exception symbols from msgutil for backward compatibility
+from mod_pywebsocket._stream_base import ConnectionTerminatedException
+from mod_pywebsocket._stream_base import InvalidFrameException
+from mod_pywebsocket._stream_base import BadOperationException
+from mod_pywebsocket._stream_base import UnsupportedFrameException
+
+
+# An API for handler to send/receive WebSocket messages.
+def close_connection(request):
+    """Close connection.
+
+    Args:
+        request: mod_python request.
+    """
+    request.ws_stream.close_connection()
+
+
+def send_message(request, payload_data, end=True, binary=False):
+    """Send a message (or part of a message).
+
+    Args:
+        request: mod_python request.
+        payload_data: unicode text or str binary to send.
+        end: True to terminate a message.
+             False to send payload_data as part of a message that is to be
+             terminated by next or later send_message call with end=True.
+        binary: send payload_data as binary frame(s).
+    Raises:
+        BadOperationException: when server already terminated.
+    """
+    request.ws_stream.send_message(payload_data, end, binary)
+
+
+def receive_message(request):
+    """Receive a WebSocket frame and return its payload as a text in
+    unicode or a binary in str.
+
+    Args:
+        request: mod_python request.
+    Raises:
+        InvalidFrameException:     when client send invalid frame.
+        UnsupportedFrameException: when client send unsupported frame e.g. some
+                                   of reserved bit is set but no extension can
+                                   recognize it.
+        InvalidUTF8Exception:      when client send a text frame containing any
+                                   invalid UTF-8 string.
+        ConnectionTerminatedException: when the connection is closed
+                                   unexpectedly.
+        BadOperationException:     when client already terminated.
+    """
+    return request.ws_stream.receive_message()
+
+
+def send_ping(request, body=''):
+    request.ws_stream.send_ping(body)
+
+
+class MessageReceiver(threading.Thread):
+    """This class receives messages from the client.
+
+    This class provides three ways to receive messages: blocking,
+    non-blocking, and via callback. Callback has the highest precedence.
+
+    Note: This class should not be used with the standalone server for wss
+    because pyOpenSSL used by the server raises a fatal error if the socket
+    is accessed from multiple threads.
+    """
+
+    def __init__(self, request, onmessage=None):
+        """Construct an instance.
+
+        Args:
+            request: mod_python request.
+            onmessage: a function to be called when a message is received.
+                       May be None. If not None, the function is called on
+                       another thread. In that case, MessageReceiver.receive
+                       and MessageReceiver.receive_nowait are useless
+                       because they will never return any messages.
+        """
+
+        threading.Thread.__init__(self)
+        self._request = request
+        self._queue = queue.Queue()
+        self._onmessage = onmessage
+        self._stop_requested = False
+        self.setDaemon(True)
+        self.start()
+
+    def run(self):
+        try:
+            while not self._stop_requested:
+                message = receive_message(self._request)
+                if self._onmessage:
+                    self._onmessage(message)
+                else:
+                    self._queue.put(message)
+        finally:
+            close_connection(self._request)
+
+    def receive(self):
+        """ Receive a message from the channel, blocking.
+
+        Returns:
+            message as a unicode string.
+        """
+        return self._queue.get()
+
+    def receive_nowait(self):
+        """ Receive a message from the channel, non-blocking.
+
+        Returns:
+            message as a unicode string if available. None otherwise.
+        """
+        try:
+            message = self._queue.get_nowait()
+        except queue.Empty:
+            message = None
+        return message
+
+    def stop(self):
+        """Request to stop this instance.
+
+        The instance will be stopped after receiving the next message.
+        This method may not be very useful, but there is no clean way
+        in Python to forcefully stop a running thread.
+        """
+        self._stop_requested = True
+
+
+class MessageSender(threading.Thread):
+    """This class sends messages to the client.
+
+    This class provides both synchronous and asynchronous ways to send
+    messages.
+
+    Note: This class should not be used with the standalone server for wss
+    because pyOpenSSL used by the server raises a fatal error if the socket
+    is accessed from multiple threads.
+    """
+
+    def __init__(self, request):
+        """Construct an instance.
+
+        Args:
+            request: mod_python request.
+        """
+        threading.Thread.__init__(self)
+        self._request = request
+        self._queue = queue.Queue()
+        self.setDaemon(True)
+        self.start()
+
+    def run(self):
+        while True:
+            message, condition = self._queue.get()
+            condition.acquire()
+            send_message(self._request, message)
+            condition.notify()
+            condition.release()
+
+    def send(self, message):
+        """Send a message, blocking."""
+
+        condition = threading.Condition()
+        condition.acquire()
+        self._queue.put((message, condition))
+        condition.wait()
+
+    def send_nowait(self, message):
+        """Send a message, non-blocking."""
+
+        self._queue.put((message, threading.Condition()))
+
+
+# vi:sts=4 sw=4 et
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+from yowsup.structs import ProtocolEntity, ProtocolTreeNode
+from .message_media import MediaMessageProtocolEntity
+
+class LocationMediaMessageProtocolEntity(MediaMessageProtocolEntity):
+    '''
+    <message t="{{TIME_STAMP}}" from="{{CONTACT_JID}}" 
+    offline="{{OFFLINE}}" type="text" id="{{MESSAGE_ID}}" notify="{{NOTIFY_NAME}}">
+        <media 
+            latitude="52.52393" 
+            type="location"
+            longitude="13.41747"
+            name="Location Name"
+            url="http://www.foursquare.com/XXXX"
+            encoding="raw"
+        >{{THUMBNAIL_RAWDATA}}</media>
+    </message>
+    '''
+
+
+    def __init__(self, latitude, longitude, name, url, encoding, _id = None, _from = None, to = None, notify = None, timestamp = None, participant = None,
+            preview = None, offline = None, retry = None, description = None):
+
+        super(LocationMediaMessageProtocolEntity, self).__init__("location", _id, _from, to, notify, timestamp, participant, preview, offline, retry)
+        self.setLocationMediaProps(latitude,longitude,name,url,encoding, description)
+
+    def __str__(self):
+        out  = super(MediaMessageProtocolEntity, self).__str__()
+        out += "Latitude: %s\n" % self.latitude
+        out += "Longitude: %s\n" % self.longitude
+        out += "Name: %s\n" % self.name
+        out += "URL: %s\n" % self.url
+        out += "Encoding: %s\n" % self.encoding
+        out += "Description: %s\n" % self.description
+
+        return out
+
+    def getLatitude(self):
+        return self.latitude
+
+    def getLongitude(self):
+        return self.longitude
+
+    def getLocationName(self):
+        return self.name
+
+    def getLocationURL(self):
+        return self.url
+
+    def getDescription(self):
+        return self.description
+
+    def setLocationMediaProps(self, latitude, longitude, locationName, url, encoding, description):
+        self.latitude = str(latitude)
+        self.longitude = str(longitude)
+        self.name = locationName
+        self.url = url
+        self.encoding = encoding
+        self.description = description
+
+    def toProtocolTreeNode(self):
+        node = super(LocationMediaMessageProtocolEntity, self).toProtocolTreeNode()
+        mediaNode = node.getChild("media")
+        mediaNode.setAttribute("latitude",  self.latitude)
+        mediaNode.setAttribute("longitude",  self.longitude)
+        mediaNode.setAttribute("encoding", self.encoding)
+
+        if self.name:
+            mediaNode.setAttribute("name", self.name)
+        if self.url:
+            mediaNode.setAttribute("url", self.url)
+        if self.description:
+            mediaNode.setAttribute("description", self.description)
+            
+        return node
+
+    @staticmethod
+    def fromProtocolTreeNode(node):
+        entity = MediaMessageProtocolEntity.fromProtocolTreeNode(node)
+        entity.__class__ = LocationMediaMessageProtocolEntity
+        mediaNode = node.getChild("media")
+        entity.setLocationMediaProps(
+            mediaNode.getAttributeValue("latitude"),
+            mediaNode.getAttributeValue("longitude"),
+            mediaNode.getAttributeValue("name"),
+            mediaNode.getAttributeValue("url"),
+            mediaNode.getAttributeValue("encoding"),
+            mediaNode.getAttributeValue("description")
+            )
+        return entity
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+from yowsup.structs import ProtocolEntity, ProtocolTreeNode
+from .message_media import MediaMessageProtocolEntity
+
+class LocationMediaMessageProtocolEntity(MediaMessageProtocolEntity):
+    '''
+    <message t="{{TIME_STAMP}}" from="{{CONTACT_JID}}" 
+    offline="{{OFFLINE}}" type="text" id="{{MESSAGE_ID}}" notify="{{NOTIFY_NAME}}">
+        <media 
+            latitude="52.52393" 
+            type="location"
+            longitude="13.41747"
+            name="Location Name"
+            url="http://www.foursquare.com/XXXX"
+            encoding="raw"
+        >{{THUMBNAIL_RAWDATA}}</media>
+    </message>
+    '''
+
+
+    def __init__(self, latitude, longitude, name, url, encoding, _id = None, _from = None, to = None, notify = None, timestamp = None, participant = None,
+            preview = None, offline = None, retry = None, description = None):
+
+        super(LocationMediaMessageProtocolEntity, self).__init__("location", _id, _from, to, notify, timestamp, participant, preview, offline, retry)
+        self.setLocationMediaProps(latitude,longitude,name,url,encoding, description)
+
+    def __str__(self):
+        out  = super(MediaMessageProtocolEntity, self).__str__()
+        out += "Latitude: %s\n" % self.latitude
+        out += "Longitude: %s\n" % self.longitude
+        out += "Name: %s\n" % self.name
+        out += "URL: %s\n" % self.url
+        out += "Encoding: %s\n" % self.encoding
+        out += "Description: %s\n" % self.description
+
+        return out
+
+    def getLatitude(self):
+        return self.latitude
+
+    def getLongitude(self):
+        return self.longitude
+
+    def getLocationName(self):
+        return self.name
+
+    def getLocationURL(self):
+        return self.url
+
+    def getDescription(self):
+        return self.description
+
+    def setLocationMediaProps(self, latitude, longitude, locationName, url, encoding, description):
+        self.latitude = str(latitude)
+        self.longitude = str(longitude)
+        self.name = locationName
+        self.url = url
+        self.encoding = encoding
+        self.description = description
+
+    def toProtocolTreeNode(self):
+        node = super(LocationMediaMessageProtocolEntity, self).toProtocolTreeNode()
+        mediaNode = node.getChild("media")
+        mediaNode.setAttribute("latitude",  self.latitude)
+        mediaNode.setAttribute("longitude",  self.longitude)
+        mediaNode.setAttribute("encoding", self.encoding)
+
+        if self.name:
+            mediaNode.setAttribute("name", self.name)
+        if self.url:
+            mediaNode.setAttribute("url", self.url)
+        if self.description:
+            mediaNode.setAttribute("description", self.description)
+
+        return node
+
+    @staticmethod
+    def fromProtocolTreeNode(node):
+        entity = MediaMessageProtocolEntity.fromProtocolTreeNode(node)
+        entity.__class__ = LocationMediaMessageProtocolEntity
+        mediaNode = node.getChild("media")
+        entity.setLocationMediaProps(
+            mediaNode.getAttributeValue("latitude"),
+            mediaNode.getAttributeValue("longitude"),
+            mediaNode.getAttributeValue("name"),
+            mediaNode.getAttributeValue("url"),
+            mediaNode.getAttributeValue("encoding"),
+            mediaNode.getAttributeValue("description")
+            )
+        return entity
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+# encoding: utf-8
+"""
+message.py
+
+Created by Thomas Mangin on 2013-02-26.
+Copyright (c) 2009-2012 Exa Networks. All rights reserved.
+"""
+
+from struct import unpack
+from exabgp.bmp.peer import Peer
+from exabgp.bmp.message import Message
+
+class Header (object):
+	def __init__ (self,data):
+		self.version = ord(data[0])
+		self.message = Message(ord(data[1]))
+		self.peer = Peer(data)
+
+		self.time_sec = unpack('!L',data[36:40])[0]
+		self.time_micro_sec = unpack('!L',data[40:44])[0]
+
+	def validate (self):
+		if self.version != 1: return False
+		if not self.message.validate(): return False
+		if not self.peer.validate(): return False
+		return True
+
+	def json (self):
+		return "{}"
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+"Message support RFC 2440.10"
+
+# TODO OpenPGP Grammar
+#
+#   What I'd like to do is turn this all into a slick parser, or 
+#   convert it to some form that an existing parser can understand. My
+#   guess is that doing so would make it much easier to add message
+#   types (and packet types) support more complex messages.
+#
+# TODO pkts integrity
+#
+#   Right now, pkts is deep-copied to preserve the original on
+#   the outside.
+#
+#   It might be nice to replace the pop() logic in pkts parsing 
+#   with the strcalc(func, pkts[idx:idx+n], idx) deal used 
+#   in packet parsing (advantages: speed?) and no need to make
+#   copies of outside the pkts). Either that or..
+#
+#   Things are a little off-kilter in that the pkts is
+#   manipulated via functions instead of manipulating itself (like
+#   with list.pop()). One solution would be to extend list 
+#   functionality with a PacketList class that defined a organize_msgs
+#   method similar to pop().
+#
+# TODO nested messages
+#
+#   The way things work now, messages are built up like this -
+#
+#   For a particular message pattern:
+#   1) see if the packet falls in line with the message pattern (if
+#   so, keep it, if not, ditch it and fail) 2) if the pattern accepts
+#   a nested message, recurse the pattern search and add the nested
+#   message instance 3) see if the message pattern has been matched
+#   (if so, return, if not, repeat)
+
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import base64
+import binascii
+
+from Crypto.Cipher import AES
+from axolotl.kdf.hkdfv3 import HKDFv3
+from axolotl.util.byteutil import ByteUtil
+
+from .message_media import MediaMessageProtocolEntity
+from yowsup.common.tools import WATools
+from yowsup.common.tools import MimeTools
+import os
+class DownloadableMediaMessageProtocolEntity(MediaMessageProtocolEntity):
+    '''
+    <message t="{{TIME_STAMP}}" from="{{CONTACT_JID}}"
+        offline="{{OFFLINE}}" type="text" id="{{MESSAGE_ID}}" notify="{{NOTIFY_NAME}}">
+        <media type="{{DOWNLOADABLE_MEDIA_TYPE: (image | audio | video)}}"
+            mimetype="{{MIME_TYPE}}"
+            filehash="{{FILE_HASH}}"
+            url="{{DOWNLOAD_URL}}"
+            ip="{{IP}}"
+            size="{{MEDIA SIZE}}"
+            file="{{FILENAME}}"
+
+            > {{THUMBNAIL_RAWDATA (JPEG?)}}
+        </media>
+    </message>
+    '''
+    def __init__(self, mediaType,
+            mimeType, fileHash, url, ip, size, fileName, mediaKey = None,
+            _id = None, _from = None, to = None, notify = None, timestamp = None,
+            participant = None, preview = None, offline = None, retry = None):
+
+        super(DownloadableMediaMessageProtocolEntity, self).__init__(mediaType, _id, _from, to, notify, timestamp, participant, preview, offline, retry)
+        self.setDownloadableMediaProps(mimeType, fileHash, url, ip, size, fileName, mediaKey)
+
+    def __str__(self):
+        out  = super(DownloadableMediaMessageProtocolEntity, self).__str__()
+        out += "MimeType: %s\n" % self.mimeType
+        out += "File Hash: %s\n" % self.fileHash.encode('hex')
+        out += "URL: %s\n" % self.url
+        out += "IP: %s\n" % self.ip
+        out += "File Size: %s\n" % self.size
+        out += "File name: %s\n" % self.fileName
+        return out
+
+    def decrypt(self, encimg, refkey):
+        derivative = HKDFv3().deriveSecrets(refkey, binascii.unhexlify(self.cryptKeys), 112)
+        parts = ByteUtil.split(derivative, 16, 32)
+        iv = parts[0]
+        cipherKey = parts[1]
+        e_img = encimg[:-10]
+        AES.key_size = 128
+        cr_obj = AES.new(key=cipherKey, mode=AES.MODE_CBC, IV=iv)
+        return cr_obj.decrypt(e_img)
+
+    def getMediaContent(self):
+        import sys
+        if sys.version_info >= (3, 0):
+            from urllib.request import urlopen
+        else:
+            from urllib2 import urlopen
+
+        data = urlopen(self.url).read()
+        if self.mediaKey:
+            data = self.decrypt(data, self.mediaKey)
+        return data
+
+    def getMediaSize(self):
+        return self.size
+
+    def getMediaUrl(self):
+        return self.url
+
+    def getMimeType(self):
+        return self.mimeType
+
+    def setDownloadableMediaProps(self, mimeType, fileHash, url, ip, size, fileName, mediaKey):
+        self.mimeType   = mimeType
+        self.fileHash   = fileHash
+        self.url        = url
+        self.ip         = ip
+        self.size       = int(size)
+        self.fileName   = fileName
+        self.mediaKey   = mediaKey
+        self.cryptKeys  = None
+
+    def toProtocolTreeNode(self):
+        node = super(DownloadableMediaMessageProtocolEntity, self).toProtocolTreeNode()
+        mediaNode = node.getChild("media")
+        mediaNode.setAttribute("mimetype",  self.mimeType)
+        mediaNode.setAttribute("filehash",  self.fileHash)
+        mediaNode.setAttribute("url",       self.url)
+        if self.ip:
+            mediaNode.setAttribute("ip",        self.ip)
+        mediaNode.setAttribute("size",      str(self.size))
+        mediaNode.setAttribute("file",      self.fileName)
+        if self.mediaKey:
+            mediaNode.setAttribute("mediakey", self.mediaKey)
+
+        return node
+
+    def isEncrypted(self):
+        return self.mediaKey is not None
+
+    @staticmethod
+    def fromProtocolTreeNode(node):
+        entity = MediaMessageProtocolEntity.fromProtocolTreeNode(node)
+        entity.__class__ = DownloadableMediaMessageProtocolEntity
+        mediaNode = node.getChild("media")
+        entity.setDownloadableMediaProps(
+            mediaNode.getAttributeValue("mimetype"),
+            mediaNode.getAttributeValue("filehash"),
+            mediaNode.getAttributeValue("url"),
+            mediaNode.getAttributeValue("ip"),
+            mediaNode.getAttributeValue("size"),
+            mediaNode.getAttributeValue("file"),
+            mediaNode.getAttributeValue("mediakey")
+        )
+        return entity
+
+    @staticmethod
+    def fromBuilder(builder):
+        url = builder.get("url")
+        ip = builder.get("ip")
+        assert url, "Url is required"
+        mimeType = builder.get("mimetype", MimeTools.getMIME(builder.getOriginalFilepath())[0])
+        filehash = WATools.getFileHashForUpload(builder.getFilepath())
+        size = os.path.getsize(builder.getFilepath())
+        fileName = os.path.basename(builder.getFilepath())
+        return DownloadableMediaMessageProtocolEntity(builder.mediaType, mimeType, filehash, url, ip, size, fileName, to = builder.jid, preview = builder.get("preview"))
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import unittest
+
+from Tribler.community.market.core.assetamount import AssetAmount
+from Tribler.community.market.core.assetpair import AssetPair
+from Tribler.community.market.core.payment import Payment
+from Tribler.community.market.core.payment_id import PaymentId
+from Tribler.community.market.core.transaction import TransactionNumber, TransactionId, Transaction, StartTransaction
+from Tribler.community.market.core.timestamp import Timestamp
+from Tribler.community.market.core.order import OrderId, OrderNumber
+from Tribler.community.market.core.message import TraderId
+from Tribler.community.market.core.trade import Trade
+from Tribler.community.market.core.wallet_address import WalletAddress
+
+
+class TransactionNumberTestSuite(unittest.TestCase):
+    """Message number test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_number = TransactionNumber(1)
+        self.transaction_number2 = TransactionNumber(1)
+        self.transaction_number3 = TransactionNumber(3)
+
+    def test_conversion(self):
+        # Test for conversions
+        self.assertEqual(1, int(self.transaction_number))
+        self.assertEqual('1', str(self.transaction_number))
+
+    def test_init(self):
+        # Test for init validation
+        with self.assertRaises(ValueError):
+            TransactionNumber(1.0)
+
+    def test_equality(self):
+        # Test for equality
+        self.assertTrue(self.transaction_number == self.transaction_number2)
+        self.assertTrue(self.transaction_number != self.transaction_number3)
+        self.assertFalse(self.transaction_number == 6)
+
+    def test_hash(self):
+        # Test for hashes
+        self.assertEqual(self.transaction_number.__hash__(), self.transaction_number2.__hash__())
+        self.assertNotEqual(self.transaction_number.__hash__(), self.transaction_number3.__hash__())
+
+
+class TransactionIdTestSuite(unittest.TestCase):
+    """Transaction ID test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_id = TransactionId(TraderId('0'), TransactionNumber(1))
+        self.transaction_id2 = TransactionId(TraderId('0'), TransactionNumber(1))
+        self.transaction_id3 = TransactionId(TraderId('0'), TransactionNumber(2))
+
+    def test_properties(self):
+        # Test for properties
+        self.assertEqual(TraderId('0'), self.transaction_id.trader_id)
+        self.assertEqual(TransactionNumber(1), self.transaction_id.transaction_number)
+
+    def test_conversion(self):
+        # Test for conversions
+        self.assertEqual('0.1', str(self.transaction_id))
+
+    def test_equality(self):
+        # Test for equality
+        self.assertTrue(self.transaction_id == self.transaction_id2)
+        self.assertTrue(self.transaction_id == self.transaction_id)
+        self.assertTrue(self.transaction_id != self.transaction_id3)
+        self.assertFalse(self.transaction_id == 6)
+
+    def test_hash(self):
+        # Test for hashes
+        self.assertEqual(self.transaction_id.__hash__(), self.transaction_id2.__hash__())
+        self.assertNotEqual(self.transaction_id.__hash__(), self.transaction_id3.__hash__())
+
+
+class TransactionTestSuite(unittest.TestCase):
+    """Transaction test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_id = TransactionId(TraderId("0"), TransactionNumber(1))
+        self.transaction = Transaction(self.transaction_id, AssetPair(AssetAmount(100, 'BTC'), AssetAmount(100, 'MB')),
+                                       OrderId(TraderId('3'), OrderNumber(2)),
+                                       OrderId(TraderId('2'), OrderNumber(1)), Timestamp(0.0))
+        self.proposed_trade = Trade.propose(TraderId('0'),
+                                            OrderId(TraderId('0'), OrderNumber(2)),
+                                            OrderId(TraderId('1'), OrderNumber(3)),
+                                            AssetPair(AssetAmount(100, 'BTC'), AssetAmount(100, 'MB')), Timestamp(0.0))
+        self.payment = Payment(TraderId("0"), TransactionId(TraderId('2'), TransactionNumber(2)),
+                               AssetAmount(3, 'MB'), WalletAddress('a'), WalletAddress('b'),
+                               PaymentId('aaa'), Timestamp(4.0), True)
+
+    def test_from_proposed_trade(self):
+        """
+        Test creating a transaction from a proposed trade
+        """
+        transaction = Transaction.from_proposed_trade(self.proposed_trade, self.transaction_id)
+        self.assertEqual(transaction.assets, self.transaction.assets)
+
+    def test_add_payment(self):
+        """
+        Test the addition of a payment to a transaction
+        """
+        self.transaction.add_payment(self.payment)
+        self.assertEqual(self.transaction.transferred_assets.first.amount, 0)
+        self.assertEqual(self.transaction.transferred_assets.second.amount, 3)
+        self.assertTrue(self.transaction.payments)
+
+    def test_next_payment(self):
+        """
+        Test the process of determining the next payment details during a transaction
+        """
+        self.assertEqual(self.transaction.next_payment(True), AssetAmount(100, 'BTC'))
+        self.assertEqual(self.transaction.next_payment(False), AssetAmount(100, 'MB'))
+
+    def test_is_payment_complete(self):
+        """
+        Test whether a payment is correctly marked as complete
+        """
+        self.assertFalse(self.transaction.is_payment_complete())
+        self.transaction.add_payment(self.payment)
+        self.assertFalse(self.transaction.is_payment_complete())
+        self.transaction._transferred_assets = AssetPair(AssetAmount(100, 'BTC'), AssetAmount(100, 'MB'))
+        self.assertTrue(self.transaction.is_payment_complete())
+
+    def test_to_dictionary(self):
+        """
+        Test the to dictionary method of a transaction
+        """
+        self.assertDictEqual(self.transaction.to_dictionary(), {
+            'trader_id': '0',
+            'transaction_number': 1,
+            'order_number': 2,
+            'partner_trader_id': '2',
+            'partner_order_number': 1,
+            'payment_complete': False,
+            'assets': {
+                'first': {
+                    'amount': 100,
+                    'type': 'BTC',
+                },
+                'second': {
+                    'amount': 100,
+                    'type': 'MB'
+                }
+            },
+            'transferred': {
+                'first': {
+                    'amount': 0,
+                    'type': 'BTC',
+                },
+                'second': {
+                    'amount': 0,
+                    'type': 'MB'
+                }
+            },
+            'timestamp': 0.0,
+            'status': 'pending'
+        })
+
+    def test_status(self):
+        """
+        Test the status of a transaction
+        """
+        self.assertEqual(self.transaction.status, 'pending')
+
+        self.payment._success = False
+        self.transaction.add_payment(self.payment)
+        self.assertEqual(self.transaction.status, 'error')
+
+
+class StartTransactionTestSuite(unittest.TestCase):
+    """Start transaction test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.start_transaction = StartTransaction(TraderId('0'),
+                                                  TransactionId(TraderId("0"), TransactionNumber(1)),
+                                                  OrderId(TraderId('0'), OrderNumber(1)),
+                                                  OrderId(TraderId('1'), OrderNumber(1)), 1234,
+                                                  AssetPair(AssetAmount(30, 'BTC'), AssetAmount(40, 'MC')),
+                                                  Timestamp(0.0))
+
+    def test_from_network(self):
+        # Test for from network
+        data = StartTransaction.from_network(
+            type('Data', (object,), {"trader_id": TraderId('0'),
+                                     "transaction_id": TransactionId(TraderId('0'), TransactionNumber(1)),
+                                     "order_id": OrderId(TraderId('0'), OrderNumber(1)),
+                                     "recipient_order_id": OrderId(TraderId('1'), OrderNumber(2)),
+                                     "proposal_id": 1235,
+                                     "assets": AssetPair(AssetAmount(30, 'BTC'), AssetAmount(40, 'MC')),
+                                     "timestamp": Timestamp(0.0)}))
+
+        self.assertEquals(TraderId("0"), data.trader_id)
+        self.assertEquals(TransactionId(TraderId("0"), TransactionNumber(1)), data.transaction_id)
+        self.assertEquals(OrderId(TraderId('0'), OrderNumber(1)), data.order_id)
+        self.assertEquals(OrderId(TraderId('1'), OrderNumber(2)), data.recipient_order_id)
+        self.assertEquals(1235, data.proposal_id)
+        self.assertEquals(Timestamp(0.0), data.timestamp)
+
+    def test_to_network(self):
+        """
+        Test the conversion of a StartTransaction object to the network
+        """
+        data = self.start_transaction.to_network()
+        self.assertEqual(data[0], self.start_transaction.trader_id)
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+##############################################################################
+# Copyright (c) 2013-2018, Lawrence Livermore National Security, LLC.
+# Produced at the Lawrence Livermore National Laboratory.
+#
+# This file is part of Spack.
+# Created by Todd Gamblin, tgamblin@llnl.gov, All rights reserved.
+# LLNL-CODE-647188
+#
+# For details, see https://github.com/spack/spack
+# Please also see the NOTICE and LICENSE files for our notice and the LGPL.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License (as
+# published by the Free Software Foundation) version 2.1, February 1999.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the IMPLIED WARRANTY OF
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the terms and
+# conditions of the GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+##############################################################################
+from spack import *
+
+
+class Mpe2(Package):
+    """Message Passing Extensions (MPE): Parallel, shared X window graphics"""
+
+    homepage = "http://www.mcs.anl.gov/research/projects/perfvis/software/MPE/"
+    url      = "http://ftp.mcs.anl.gov/pub/mpi/mpe/mpe2-1.3.0.tar.gz"
+
+    version('1.3.0', '67bf0c7b2e573df3ba0d2059a96c2f7b')
+
+    patch('mpe2.patch')
+
+    depends_on("mpi")
+
+    provides("mpe")
+
+    def install(self, spec, prefix):
+        configure("--prefix=" + prefix,
+                  "--x-includes=/usr/X11R6/include",
+                  "--x-libraries=/usr/X11R6/lib",
+                  "--enable-mpe_graphics=yes",
+                  "--disable-f77",
+                  "--enable-viewers=no",
+                  "--enable-slog2=no",
+                  "--with-mpicc=mpicc")
+
+        make()
+        make("install")
+
+Query: voice recognition function
+
+************************** NEXT RESULT **************************************
+import unittest
+
+from Tribler.community.market.core.payment import Payment
+from Tribler.community.market.core.payment_id import PaymentId
+from Tribler.community.market.core.transaction import TransactionNumber, TransactionId, Transaction, StartTransaction
+from Tribler.community.market.core.quantity import Quantity
+from Tribler.community.market.core.price import Price
+from Tribler.community.market.core.timestamp import Timestamp
+from Tribler.community.market.core.order import OrderId, OrderNumber
+from Tribler.community.market.core.message import TraderId, MessageNumber, MessageId
+from Tribler.community.market.core.trade import Trade
+from Tribler.community.market.core.wallet_address import WalletAddress
+
+
+class TransactionNumberTestSuite(unittest.TestCase):
+    """Message number test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_number = TransactionNumber(1)
+        self.transaction_number2 = TransactionNumber(1)
+        self.transaction_number3 = TransactionNumber(3)
+
+    def test_conversion(self):
+        # Test for conversions
+        self.assertEqual(1, int(self.transaction_number))
+        self.assertEqual('1', str(self.transaction_number))
+
+    def test_init(self):
+        # Test for init validation
+        with self.assertRaises(ValueError):
+            TransactionNumber(1.0)
+
+    def test_equality(self):
+        # Test for equality
+        self.assertTrue(self.transaction_number == self.transaction_number2)
+        self.assertTrue(self.transaction_number == self.transaction_number)
+        self.assertTrue(self.transaction_number != self.transaction_number3)
+        self.assertFalse(self.transaction_number == 6)
+
+    def test_hash(self):
+        # Test for hashes
+        self.assertEqual(self.transaction_number.__hash__(), self.transaction_number2.__hash__())
+        self.assertNotEqual(self.transaction_number.__hash__(), self.transaction_number3.__hash__())
+
+
+class TransactionIdTestSuite(unittest.TestCase):
+    """Transaction ID test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_id = TransactionId(TraderId('0'), TransactionNumber(1))
+        self.transaction_id2 = TransactionId(TraderId('0'), TransactionNumber(1))
+        self.transaction_id3 = TransactionId(TraderId('0'), TransactionNumber(2))
+
+    def test_properties(self):
+        # Test for properties
+        self.assertEqual(TraderId('0'), self.transaction_id.trader_id)
+        self.assertEqual(TransactionNumber(1), self.transaction_id.transaction_number)
+
+    def test_conversion(self):
+        # Test for conversions
+        self.assertEqual('0.1', str(self.transaction_id))
+
+    def test_equality(self):
+        # Test for equality
+        self.assertTrue(self.transaction_id == self.transaction_id2)
+        self.assertTrue(self.transaction_id == self.transaction_id)
+        self.assertTrue(self.transaction_id != self.transaction_id3)
+        self.assertFalse(self.transaction_id == 6)
+
+    def test_hash(self):
+        # Test for hashes
+        self.assertEqual(self.transaction_id.__hash__(), self.transaction_id2.__hash__())
+        self.assertNotEqual(self.transaction_id.__hash__(), self.transaction_id3.__hash__())
+
+
+class TransactionTestSuite(unittest.TestCase):
+    """Transaction test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.transaction_id = TransactionId(TraderId("0"), TransactionNumber(1))
+        self.transaction = Transaction(self.transaction_id, Price(100, 'BTC'), Quantity(30, 'MC'),
+                                       OrderId(TraderId('3'), OrderNumber(2)),
+                                       OrderId(TraderId('2'), OrderNumber(1)), Timestamp(0.0))
+        self.proposed_trade = Trade.propose(MessageId(TraderId('0'), MessageNumber('1')),
+                                            OrderId(TraderId('0'), OrderNumber(2)),
+                                            OrderId(TraderId('1'), OrderNumber(3)),
+                                            Price(100, 'BTC'), Quantity(30, 'MC'), Timestamp(0.0))
+        self.payment = Payment(MessageId(TraderId("0"), MessageNumber("1")),
+                               TransactionId(TraderId('2'), TransactionNumber(2)),
+                               Quantity(3, 'MC'), Price(2, 'BTC'),
+                               WalletAddress('a'), WalletAddress('b'),
+                               PaymentId('aaa'), Timestamp(4.0), True)
+
+    def test_from_proposed_trade(self):
+        # Test from proposed trade
+        transaction = Transaction.from_proposed_trade(self.proposed_trade, self.transaction_id)
+        self.assertEqual(transaction.price, self.transaction.price)
+        self.assertEqual(transaction.total_quantity, self.transaction.total_quantity)
+        self.assertEqual(transaction.timestamp, self.transaction.timestamp)
+
+    def test_unitize(self):
+        """
+        Test the unitize method of a Transaction
+        """
+        self.assertEqual(Transaction.unitize(1, 1), 1)
+        self.assertEqual(Transaction.unitize(0.03, 0.02), 0.04)
+        self.assertEqual(Transaction.unitize(50, 0.05), 50)
+        self.assertEqual(Transaction.unitize(50.1818, 25), 75)
+
+    def test_add_payment(self):
+        """
+        Test the addition of a payment to a transaction
+        """
+        self.transaction.add_payment(self.payment)
+        self.assertEqual(self.transaction.transferred_price, Price(2, 'BTC'))
+        self.assertEqual(self.transaction.transferred_quantity, Quantity(3, 'MC'))
+        self.assertTrue(self.transaction.payments)
+
+    def test_last_payment(self):
+        """
+        Test the retrieval of the last payment
+        """
+        self.assertIsNone(self.transaction.last_payment(True))
+        self.assertIsNone(self.transaction.last_payment(False))
+
+        self.transaction.add_payment(self.payment)
+        self.assertEqual(self.transaction.last_payment(True), self.payment)
+        self.assertEqual(self.transaction.last_payment(False), self.payment)
+
+    def test_next_payment(self):
+        """
+        Test the process of determining the next payment details during a transaction
+        """
+        def set_transaction_data(trans_price, trans_quantity, payment_price, payment_quantity):
+            self.transaction._transferred_price = trans_price
+            self.transaction._transferred_quantity = trans_quantity
+            self.payment._transferee_price = payment_price
+            self.payment._transferee_quantity = payment_quantity
+            self.transaction._payments = [self.payment]
+
+        # No incremental payments
+        self.assertEqual(self.transaction.next_payment(True, 1, incremental=False), Quantity(30, 'MC'))
+        self.assertEqual(self.transaction.next_payment(False, 2, incremental=False), Price(3000, 'BTC'))
+
+        self.assertEqual(self.transaction.next_payment(True, 1, incremental=True), Quantity(1, 'MC'))
+        self.assertEqual(self.transaction.next_payment(False, 2, incremental=True), Price(2, 'BTC'))
+
+        set_transaction_data(Price(1, 'BTC'), Quantity(1, 'MC'), Price(1, 'BTC'), Quantity(1, 'MC'))
+        self.assertEqual(self.transaction.next_payment(True, 0.1, incremental=True), Quantity(0.2, 'MC'))
+
+        # Test completion of trade
+        set_transaction_data(Price(3000, 'BTC'), Quantity(29, 'MC'), Price(1, 'BTC'), Quantity(1, 'MC'))
+        self.assertEqual(self.transaction.next_payment(True, 1, incremental=True), Quantity(1, 'MC'))
+        set_transaction_data(Price(2900, 'BTC'), Quantity(30, 'MC'), Price(1, 'BTC'), Quantity(1, 'MC'))
+        self.assertEqual(self.transaction.next_payment(False, 1, incremental=True), Price(100, 'BTC'))
+
+        # Test whether we don't transfer too much
+        set_transaction_data(Price(2999, 'BTC'), Quantity(29, 'MC'), Price(2999, 'BTC'), Quantity(1, 'MC'))
+        self.assertEqual(self.transaction.next_payment(True, 1, incremental=True), Quantity(1, 'MC'))
+        set_transaction_data(Price(2999, 'BTC'), Quantity(29, 'MC'), Price(1, 'BTC'), Quantity(29, 'MC'))
+        self.assertEqual(self.transaction.next_payment(False, 1, incremental=True), Price(1, 'BTC'))
+
+    def test_to_dictionary(self):
+        """
+        Test the to dictionary method of a transaction
+        """
+        self.assertDictEqual(self.transaction.to_dictionary(), {
+            'trader_id': '0',
+            'transaction_number': 1,
+            'order_number': 2,
+            'partner_trader_id': '2',
+            'partner_order_number': 1,
+            'payment_complete': False,
+            'price': 100.0,
+            'price_type': 'BTC',
+            'quantity': 30.0,
+            'quantity_type': 'MC',
+            'transferred_price': 0.0,
+            'transferred_quantity': 0.0,
+            'timestamp': 0.0,
+            'status': 'pending'
+        })
+
+    def test_status(self):
+        """
+        Test the status of a transaction
+        """
+        self.assertEqual(self.transaction.status, 'pending')
+
+        self.payment._success = False
+        self.transaction.add_payment(self.payment)
+        self.assertEqual(self.transaction.status, 'error')
+
+
+class StartTransactionTestSuite(unittest.TestCase):
+    """Start transaction test cases."""
+
+    def setUp(self):
+        # Object creation
+        self.start_transaction = StartTransaction(MessageId(TraderId('0'), MessageNumber('1')),
+                                                  TransactionId(TraderId("0"), TransactionNumber(1)),
+                                                  OrderId(TraderId('0'), OrderNumber(1)),
+                                                  OrderId(TraderId('1'), OrderNumber(1)), 1234,
+                                                  Price(30, 'BTC'), Quantity(40, 'MC'), Timestamp(0.0))
+
+    def test_from_network(self):
+        # Test for from network
+        data = StartTransaction.from_network(
+            type('Data', (object,), {"trader_id": TraderId('0'),
+                                     "message_number": MessageNumber("1"),
+                                     "transaction_trader_id": TraderId('0'),
+                                     "transaction_number": TransactionNumber(1),
+                                     "order_trader_id": TraderId('0'),
+                                     "order_number": OrderNumber(1),
+                                     "recipient_trader_id": TraderId('1'),
+                                     "recipient_order_number": OrderNumber(2),
+                                     "proposal_id": 1235,
+                                     "price": Price(300, 'BTC'),
+                                     "quantity": Quantity(20, 'MC'),
+                                     "timestamp": Timestamp(0.0)}))
+
+        self.assertEquals(MessageId(TraderId("0"), MessageNumber("1")), data.message_id)
+        self.assertEquals(TransactionId(TraderId("0"), TransactionNumber(1)), data.transaction_id)
+        self.assertEquals(OrderId(TraderId('0'), OrderNumber(1)), data.order_id)
+        self.assertEquals(OrderId(TraderId('1'), OrderNumber(2)), data.recipient_order_id)
+        self.assertEquals(1235, data.proposal_id)
+        self.assertEquals(Timestamp(0.0), data.timestamp)
+
+    def test_to_network(self):
+        """
+        Test the conversion of a StartTransaction object to the network
+        """
+        data = self.start_transaction.to_network()
+        self.assertEqual(data[0], self.start_transaction.message_id.trader_id)
+        self.assertEqual(data[1], self.start_transaction.message_id.message_number)
+        self.assertEqual(data[2], self.start_transaction.transaction_id.trader_id)
+        self.assertEqual(data[3], self.start_transaction.transaction_id.transaction_number)
+

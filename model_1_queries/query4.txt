@@ -1,0 +1,745 @@
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+"""
+    unique_nd
+"""
+from __future__ import absolute_import, division, print_function
+import logging
+
+log = logging.getLogger(__name__)
+
+
+import numpy as np
+
+def unique_nd(ar, return_index=False, return_inverse=False):
+    """
+    Find the unique n-dimensional sections (columns, planes, cubes, etc)
+    of an array. Sections are ordered along the last axis.
+
+    Returns the sorted unique sections of an array. The last row of the column is used
+    as the first sort key (see `np.lexsort` for details.) There are two optional
+    outputs in addition to the unique elements: the indices of the input array
+    (along the last axis) that give the unique values, and the indices of the unique
+    array (also along the last axis) that reconstruct the input array.
+
+    Modified to sort n-dimensional elements spanning all but the last axis, ordered
+    along the last axis. See `np.lexsort`. Note that since `np.lexsort` is not stable,
+    the indexes returned by return_index will not reconstruct the original array if
+    and only if the array values are a type with an unstable sort order (i.e. two items
+    that are otherwise inequal can be sorted either before or after one another.)
+    This is not the case for int and float values.
+
+    Parameters
+    ----------
+    ar : array_like
+        Input array.
+    return_index : bool, optional
+        If True, also return the indices along the last axis of `ar` that result in the unique
+        array.
+    return_inverse : bool, optional
+        If True, also return the indices along the last axis of the unique array that can be used
+        to reconstruct `ar`.
+
+    Returns
+    -------
+    unique : ndarray
+        The sorted unique values.
+    unique_indices : ndarray, optional
+        The indices of the first occurrences of the unique columns in the
+        original array. Only provided if `return_index` is True.
+    unique_inverse : ndarray, optional
+        The indices to reconstruct the original array from the
+        unique array. Only provided if `return_inverse` is True.
+
+    See Also
+    --------
+    numpy.lib.arraysetops : Module with a number of other functions for
+                            performing set operations on arrays.
+
+    Examples
+    --------
+    >>> unique_nd([1, 1, 2, 2, 3, 3])
+    array([1, 2, 3])
+    >>> a = np.array([[1, 5, 4], [3, 2, 2]])
+    >>> unique_nd(a)
+    array([2, 3, 1])
+
+    Return the indices of the original array that give the unique values:
+
+    >>> a = np.array([['a', 'c', 'b', 'c'],
+    ...               ['c', 'a', 'b', 'a']])
+    >>> u, indices = unique_nd(a, return_index=True)
+    >>> u
+    array([['c', 'b', 'a'],
+           ['a', 'b', 'c']],
+           dtype='|S1')
+    >>> indices
+    array([1, 2, 0])
+    >>> a[..., indices]
+    array([['c', 'b', 'a'],
+           ['a', 'b', 'c']],
+           dtype='|S1')
+
+    Reconstruct the input array from the unique values:
+
+    >>> a = np.array([[1, 2, 6, 4],
+    ...               [2, 3, 2, 1]])
+    >>> u, indices = unique_nd(a, return_inverse=True)
+    >>> u
+    array([[4, 1, 6, 2],
+           [1, 2, 2, 3]])
+    >>> indices
+    array([1, 3, 2, 0])
+    >>> u[..., indices]
+    array([[1, 2, 6, 4],
+           [2, 3, 2, 1]])
+
+    """
+
+    if ar.size == 0:
+        if return_inverse and return_index:
+            return ar, np.empty(0, np.bool), np.empty(0, np.bool)
+        elif return_inverse or return_index:
+            return ar, np.empty(0, np.bool)
+        else:
+            return ar
+
+    if return_inverse or return_index:
+        perm = np.lexsort(ar)
+        aux = ar[..., perm]
+        flag = np.concatenate(([True], (aux[..., 1:] != aux[..., :-1])[-1]), axis=-1)
+        if return_inverse:
+            iflag = np.cumsum(flag) - 1
+            iperm = perm.argsort()
+            if return_index:
+                return aux[..., flag], perm[..., flag], iflag[..., iperm]
+            else:
+                return aux[..., flag], iflag[..., iperm]
+        else:
+            return aux[..., flag], perm[..., flag]
+
+    else:
+        ar = ar[..., np.lexsort(ar)]
+        flag = np.concatenate(([True], (ar[..., 1:] != ar[..., :-1])[-1]), axis=-1)
+        return ar[..., flag]
+
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+"""Unique JobPhase.{job_id,label}
+
+Revision ID: 4ffb7e1df217
+Revises: 545e104c5f5a
+Create Date: 2014-01-21 11:12:10.408310
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = '4ffb7e1df217'
+down_revision = '545e104c5f5a'
+
+from alembic import op
+
+
+def upgrade():
+    op.create_unique_constraint('unq_jobphase_key', 'jobphase', ['job_id', 'label'])
+
+
+def downgrade():
+    op.drop_constraint('unq_jobphase_key', 'jobphase')
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+"""Unique Step.order
+
+Revision ID: 3d9067f21201
+Revises: 2622a69cd25a
+Create Date: 2013-12-18 15:06:47.035804
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = '3d9067f21201'
+down_revision = '2622a69cd25a'
+
+from alembic import op
+
+
+def upgrade():
+    op.create_unique_constraint('unq_step_key', 'step', ['plan_id', 'order'])
+    op.drop_index('idx_step_plan_id', 'step')
+
+
+def downgrade():
+    op.create_index('idx_step_plan_id', 'step', ['plan_id'])
+    op.drop_constraint('unq_step_key', 'step')
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+#
+# This class was auto-generated from the API references found at
+# https://epayments-api.developer-ingenico.com/s2sapi/v1/
+#
+from ingenico.connect.sdk.data_object import DataObject
+from ingenico.connect.sdk.domain.errors.definitions.api_error import APIError
+from ingenico.connect.sdk.domain.payout.definitions.payout_result import PayoutResult
+
+
+class PayoutErrorResponse(DataObject):
+
+    __error_id = None
+    __errors = None
+    __payout_result = None
+
+    @property
+    def error_id(self):
+        """
+        | Unique reference, for debugging purposes, of this error response
+        
+        Type: str
+        """
+        return self.__error_id
+
+    @error_id.setter
+    def error_id(self, value):
+        self.__error_id = value
+
+    @property
+    def errors(self):
+        """
+        | List of one or more errors
+        
+        Type: list[:class:`ingenico.connect.sdk.domain.errors.definitions.api_error.APIError`]
+        """
+        return self.__errors
+
+    @errors.setter
+    def errors(self, value):
+        self.__errors = value
+
+    @property
+    def payout_result(self):
+        """
+        | Object that contains details on the created payout in case one has been created
+        
+        Type: :class:`ingenico.connect.sdk.domain.payout.definitions.payout_result.PayoutResult`
+        """
+        return self.__payout_result
+
+    @payout_result.setter
+    def payout_result(self, value):
+        self.__payout_result = value
+
+    def to_dictionary(self):
+        dictionary = super(PayoutErrorResponse, self).to_dictionary()
+        self._add_to_dictionary(dictionary, 'errorId', self.error_id)
+        self._add_to_dictionary(dictionary, 'errors', self.errors)
+        self._add_to_dictionary(dictionary, 'payoutResult', self.payout_result)
+        return dictionary
+
+    def from_dictionary(self, dictionary):
+        super(PayoutErrorResponse, self).from_dictionary(dictionary)
+        if 'errorId' in dictionary:
+            self.error_id = dictionary['errorId']
+        if 'errors' in dictionary:
+            if not isinstance(dictionary['errors'], list):
+                raise TypeError('value \'{}\' is not a list'.format(dictionary['errors']))
+            self.errors = []
+            for errors_element in dictionary['errors']:
+                errors_value = APIError()
+                self.errors.append(errors_value.from_dictionary(errors_element))
+        if 'payoutResult' in dictionary:
+            if not isinstance(dictionary['payoutResult'], dict):
+                raise TypeError('value \'{}\' is not a dictionary'.format(dictionary['payoutResult']))
+            value = PayoutResult()
+            self.payout_result = value.from_dictionary(dictionary['payoutResult'])
+        return self
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+unique_binary_search_tree_ii.py
+
+Created by Shengwei on 2014-07-08.
+"""
+
+# https://oj.leetcode.com/problems/unique-binary-search-trees-ii/
+# medium, tree, bst, recursion, dp, generator
+
+"""
+Given n, generate all structurally unique BST's (binary search trees) that store values 1...n.
+
+For example,
+Given n = 3, your program should return all 5 unique BST's shown below.
+
+   1         3     3      2      1
+    \       /     /      / \      \
+     3     2     1      1   3      2
+    /     /       \                 \
+   2     1         2                 3
+"""
+
+"""
+https://oj.leetcode.com/discuss/3440/help-simplify-my-code-the-second-one
+
+class Solution:
+    def build(self, nodes):
+        n = len(nodes)
+        if n == 0:
+            yield None
+            return
+        for i in range(n):
+            root = nodes[i]
+            for left in self.build(nodes[:i]):
+                for right in self.build(nodes[i+1:]):
+                    root.left, root.right = left, right
+                    yield root
+
+    # @return a list of tree node
+    def generateTrees(self, n):
+        nodes = map(TreeNode, range(1, n + 1))
+        return map(copy.deepcopy, self.build(nodes))
+"""
+
+# Definition for a  binary tree node
+# class TreeNode:
+#     def __init__(self, x):
+#         self.val = x
+#         self.left = None
+#         self.right = None
+
+class Solution:
+    # @return a list of tree node
+    def generateTrees(self, n):
+        
+        def build(start, end):
+            if start > end:
+                return [None]
+            
+            result = []
+            for i in xrange(start, end + 1):
+                for left in build(start, i - 1):
+                    for right in build(i + 1, end):
+                        result.append(TreeNode(i))
+                        result[-1].left = left
+                        result[-1].right = right
+            return result
+        
+        return build(1, n)
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+import os
+import tempfile
+import uuid
+import pytest
+import six
+
+from datarobot_batch_scoring.utils import UI
+from datarobot_batch_scoring.writer import ContextFile
+
+pytest_plugins = ['liveserver_fixtures']
+
+
+@pytest.fixture(scope='session')
+def session_id():
+    '''Unique session identifier, random string.'''
+    return str(uuid.uuid4())
+
+
+@pytest.yield_fixture(scope='function')
+def ui():
+    '''Unique session identifier, random string.'''
+    ui = UI(True, 'DEBUG', False)
+    yield ui
+    ui.close()
+
+
+@pytest.fixture
+def csv_file_handle_with_wide_field():
+    stream = six.StringIO()
+    stream.write('idx,data\n')
+    stream.write('1,one\n')
+    stream.write('2,two\n')
+    stream.write('3,three\n')
+    stream.write('4,')
+    for idx in six.moves.range(50000):
+        stream.write('spam{}'.format(idx))
+    stream.seek(0)
+    return stream
+
+
+@pytest.fixture
+def csv_data_with_wide_dataset():
+    """Data of a very wide dataset, whose first line does not fit within
+    the threshold for the auto_sampler
+    """
+    stream = six.StringIO()
+    # write header
+    for i in range(1024 * 128):
+        stream.write('column_{:0>8},'.format(i))
+    stream.write('end\n')
+    for i in range(1024 * 128):
+        stream.write('1,')
+    stream.write('0\n')
+    stream.seek(0)
+    return stream
+
+
+def csv_data_with_term(term):
+    """ Data where each line is terminated by term """
+    stream = six.StringIO()
+    data = [
+        'idx,data',
+        '1,one',
+        '2,two',
+        '3,three',
+    ]
+    for line in data:
+        stream.write(line + term)
+    stream.seek(0)
+    return stream
+
+
+@pytest.fixture
+def csv_data_with_cr():
+    """ Data where each line is terminated by \r """
+    return csv_data_with_term('\r')
+
+
+@pytest.fixture
+def csv_data_with_crlf():
+    """ Data where each line is terminated by \r\n """
+    return csv_data_with_term('\r\n')
+
+
+@pytest.fixture
+def csv_data_with_lf():
+    """ Data where each line is terminated by \n """
+    return csv_data_with_term('\n')
+
+
+@pytest.yield_fixture
+def csv_file_with_wide_dataset(csv_data_with_wide_dataset):
+    """Path to a very wide dataset"""
+    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as f:
+        f.write(csv_data_with_wide_dataset.getvalue().encode('utf-8'))
+    yield f.name
+    os.remove(f.name)
+
+
+@pytest.yield_fixture
+def csv_file_with_cr(csv_data_with_cr):
+    """Path to a file terminated with CR"""
+    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as f:
+        f.write(csv_data_with_cr.getvalue().encode('utf-8'))
+    yield f.name
+    os.remove(f.name)
+
+
+@pytest.yield_fixture
+def csv_file_with_lf(csv_data_with_lf):
+    """Path to a file terminated with LF"""
+    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as f:
+        f.write(csv_data_with_lf.getvalue().encode('utf-8'))
+    yield f.name
+    os.remove(f.name)
+
+
+@pytest.yield_fixture
+def csv_file_with_crlf(csv_data_with_crlf):
+    """Path to a file terminated with CRLF"""
+    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as f:
+        f.write(csv_data_with_crlf.getvalue().encode('utf-8'))
+    yield f.name
+    os.remove(f.name)
+
+
+@pytest.yield_fixture
+def run_context_file():
+    c_file = ContextFile('pid', 'lid', 10, None)
+    open(c_file.file_name, 'a')
+    yield c_file
+    c_file.clean()
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+#
+# This class was auto-generated from the API references found at
+# https://epayments-api.developer-ingenico.com/s2sapi/v1/
+#
+from ingenico.connect.sdk.data_object import DataObject
+from ingenico.connect.sdk.domain.errors.definitions.api_error import APIError
+from ingenico.connect.sdk.domain.payment.definitions.create_payment_result import CreatePaymentResult
+
+
+class PaymentErrorResponse(DataObject):
+
+    __error_id = None
+    __errors = None
+    __payment_result = None
+
+    @property
+    def error_id(self):
+        """
+        | Unique reference, for debugging purposes, of this error response
+        
+        Type: str
+        """
+        return self.__error_id
+
+    @error_id.setter
+    def error_id(self, value):
+        self.__error_id = value
+
+    @property
+    def errors(self):
+        """
+        | List of one or more errors
+        
+        Type: list[:class:`ingenico.connect.sdk.domain.errors.definitions.api_error.APIError`]
+        """
+        return self.__errors
+
+    @errors.setter
+    def errors(self, value):
+        self.__errors = value
+
+    @property
+    def payment_result(self):
+        """
+        | Object that contains details on the created payment in case one has been created
+        
+        Type: :class:`ingenico.connect.sdk.domain.payment.definitions.create_payment_result.CreatePaymentResult`
+        """
+        return self.__payment_result
+
+    @payment_result.setter
+    def payment_result(self, value):
+        self.__payment_result = value
+
+    def to_dictionary(self):
+        dictionary = super(PaymentErrorResponse, self).to_dictionary()
+        self._add_to_dictionary(dictionary, 'errorId', self.error_id)
+        self._add_to_dictionary(dictionary, 'errors', self.errors)
+        self._add_to_dictionary(dictionary, 'paymentResult', self.payment_result)
+        return dictionary
+
+    def from_dictionary(self, dictionary):
+        super(PaymentErrorResponse, self).from_dictionary(dictionary)
+        if 'errorId' in dictionary:
+            self.error_id = dictionary['errorId']
+        if 'errors' in dictionary:
+            if not isinstance(dictionary['errors'], list):
+                raise TypeError('value \'{}\' is not a list'.format(dictionary['errors']))
+            self.errors = []
+            for errors_element in dictionary['errors']:
+                errors_value = APIError()
+                self.errors.append(errors_value.from_dictionary(errors_element))
+        if 'paymentResult' in dictionary:
+            if not isinstance(dictionary['paymentResult'], dict):
+                raise TypeError('value \'{}\' is not a dictionary'.format(dictionary['paymentResult']))
+            value = CreatePaymentResult()
+            self.payment_result = value.from_dictionary(dictionary['paymentResult'])
+        return self
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+import uuid
+from unittest import mock
+
+import docker
+import pytest
+from aiohttp.test_utils import unused_port, make_mocked_coro
+
+import talkbot
+from talkbot.main import create_app
+
+
+@pytest.fixture(scope='session')
+def session_id():
+    """Unique session identifier, random string."""
+    return str(uuid.uuid4())
+
+
+@pytest.fixture(scope='session')
+def docker_client():
+    return docker.from_env(version='auto')
+
+
+@pytest.yield_fixture(scope='session')
+def mongo(docker_client, session_id):
+    mongo_image = "mongo:3.4"
+    port_bind = unused_port()
+    img = docker_client.images.pull(mongo_image)
+
+    container = docker_client.containers.run(mongo_image,
+                                             detach=True,
+                                             name="talkbot-test-mongo-%s" % session_id,
+                                             ports={
+                                                 '27017': port_bind
+                                             })
+    yield port_bind
+
+    container.remove(force=True)
+
+
+@pytest.yield_fixture
+def app_client(loop, test_client, mongo):
+    config = {
+        'mongo': {
+            'uri': 'mongodb://localhost:%d' % mongo,
+            'db': 'talkbot'
+        },
+        'sslchain': "/dev/random",
+        'sslprivkey': "/dev/random"
+    }
+
+    app = create_app(loop, config)
+
+    with mock.patch.object(talkbot.main.TelegramBot, 'set_hook', new=make_mocked_coro()) as mocked_hook:
+        yield loop.run_until_complete(test_client(app))
+
+        mocked_hook.assert_called()
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+# -*-coding: utf-8 -*-
+__author__ = 'dracarysX'
+
+from peewee import Model
+from wtforms.validators import ValidationError
+from wtforms.compat import string_types
+# dracarys import
+from .model import UUID_REGEXP
+
+
+class UniqueValidation(ValidationError):
+    """
+    unique validation.
+    """
+    def __init__(self, message='', *args, **kwargs):
+        ValidationError.__init__(self, message, *args, **kwargs)
+
+
+class Unique(object):
+    """
+    Validators of the peewee model unique.
+    >>> Unique(model, field_name, message)
+    """
+    field_flags = ('unique', )
+
+    def __init__(self, field, model=None, message=u''):
+        """
+
+        :param field:
+        :param model: peewee model object.
+        :param message:
+        :return:
+        """
+        self.model = model
+        self.field = field
+        self.message = message
+
+    def __call__(self, form, field):
+        try:
+            model = form.meta.model
+        except TypeError:
+            model = self.model
+        if model is None:
+            raise ValidationError(u'model is required.')
+        if form.obj is None or field.data != getattr(form.obj, self.field):
+            count = model.select().where(model._meta.fields[self.field] == field.data).count()
+            if count > 0:
+                raise UniqueValidation(self.message)
+
+
+class Foreign(object):
+    """
+    Validators of the peewee ForeignKey
+    """
+    field_flags = ('foreign', )
+
+    def __init__(self, model, message=None):
+        self.model = model
+        self.message = message or 'must be peewee model instance or int or uuid string.'
+
+    def __call__(self, form, field):
+        if isinstance(field.data, Model):
+            return
+        if isinstance(field.data, string_types) and UUID_REGEXP.search(field.data):
+            try:
+                obj = self.model.get(uuid=field.data)
+            except self.model.DoesNotExist:
+                raise ValidationError(self.message)
+            field.data = obj
+            return
+        try:
+            obj = self.model.get(id=field.data)
+        except self.model.DoesNotExist:
+            raise ValidationError(self.message)
+        field.data = obj
+        return
+
+Query: unique binary search tree
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+unique_path.py
+
+Created by Shengwei on 2014-07-28.
+"""
+
+# https://oj.leetcode.com/problems/unique-paths/
+# tags: easy / medium, matrix, path, dp
+
+"""
+A robot is located at the top-left corner of a m x n grid (marked 'Start' in the diagram below).
+
+The robot can only move either down or right at any point in time. The robot is trying to reach the bottom-right corner of the grid (marked 'Finish' in the diagram below).
+
+How many possible unique paths are there?
+
+
+Above is a 3 x 7 grid. How many possible unique paths are there?
+
+Note: m and n will be at most 100.
+"""
+
+# https://oj.leetcode.com/discuss/383/solve-unique-paths-with-linear-algorithm
+
+# Improvoment: only need O(min(m,n)) space
+
+class Solution:
+    # @return an integer
+    def uniquePaths(self, m, n):
+        matrix = [[0] * n for _ in range(m - 1)]
+        # note: this init needs to be outside of the loop
+        matrix.append([1] * n)
+        
+        for i in range(-2, -m - 1, -1):
+            for j in range(-1, -n - 1, -1):
+                down = right = 0
+                if i + 1 < 0:
+                    down = matrix[i + 1][j]
+                if j + 1 < 0:
+                    right = matrix[i][j + 1]
+                matrix[i][j] = down + right
+        
+        return matrix[0][0]
+

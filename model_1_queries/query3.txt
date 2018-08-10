@@ -1,0 +1,1797 @@
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+import json
+from os import getenv
+try:
+    from urllib.request import urlopen, Request  # Python 3
+except ImportError:
+    from urllib2 import urlopen, Request  # Python 2
+
+
+class DigitalOcean(object):
+    def __init__(self):
+        self.token = getenv('API_TOKEN')
+        self.api = "https://api.digitalocean.com/v2/domains"
+        if not self.token:
+            raise Exception('API_TOKEN not found in environment')
+
+    def determine_domain(self, domain):
+        """ Determine registered domain in API """
+        request_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {0}".format(self.token)
+        }
+        response = urlopen(Request(self.api, headers=request_headers))
+        if response.getcode() != 200:
+            raise Exception(json.loads(response.read().decode('utf8')))
+        domains = json.loads(response.read().decode('utf8'))['domains']
+        for d in domains:
+            if d['name'] in domain:
+                return d['name']
+
+    def create_record(self, name, data, domain):
+        """
+        Create DNS record
+        Params:
+            name, string, record name
+            data, string, record data
+            domain, string, dns domain
+        Return:
+            record_id, int, created record id
+        """
+        registered_domain = self.determine_domain(domain)
+        api = self.api + '/' + registered_domain + '/records'
+        request_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {0}".format(self.token)
+        }
+        request_data = {
+            "type": "TXT",
+            "ttl": 300,
+            "name": name,
+            "data": data
+        }
+        response = urlopen(Request(
+            api,
+            data=json.dumps(request_data).encode('utf8'),
+            headers=request_headers)
+        )
+        if response.getcode() != 201:
+            raise Exception(json.loads(response.read().decode('utf8')))
+        return json.loads(response.read().decode('utf8'))['domain_record']['id']
+
+    def delete_record(self, record_id, domain):
+        """
+        Delete DNS record
+        Params:
+            record_id, int, record id number
+            domain, string, dns domain
+        """
+        registered_domain = self.determine_domain(domain)
+        api = self.api + '/' + registered_domain + '/records/' + str(record_id)
+        request_headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {0}".format(self.token)
+        }
+        request = Request(api, data=json.dumps({}).encode('utf8'), headers=request_headers)
+        # this is hack around urllib to send DELETE request
+        request.get_method = lambda: 'DELETE'
+        response = urlopen(request)
+        if response.getcode() != 204:
+            raise Exception(json.loads(response.read().decode('utf8')))
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+import os
+import subprocess
+import time
+
+from django.conf import settings
+
+import jinja2
+from jingo import register
+
+from .utils import get_media_url, get_path
+
+
+try:
+    from build import BUILD_ID_CSS, BUILD_ID_JS, BUILD_ID_IMG, BUNDLE_HASHES
+except ImportError:
+    BUILD_ID_CSS = BUILD_ID_JS = BUILD_ID_IMG = 'dev'
+    BUNDLE_HASHES = {}
+
+
+def is_external(url):
+    """
+    Determine if it is an external URL.
+    """
+    return url.startswith(('//', 'http://', 'https://'))
+
+
+def _get_item_path(item):
+    """
+    Determine whether to return a relative path or a URL.
+    """
+    if is_external(item):
+        return item
+    return get_media_url() + item
+
+
+def _get_mtime(item):
+    """Get a last-changed timestamp for development."""
+    if item.startswith(('//', 'http://', 'https://')):
+        return int(time.time())
+    return int(os.path.getmtime(get_path(item)))
+
+
+def _build_html(items, wrapping):
+    """
+    Wrap `items` in wrapping.
+    """
+    return jinja2.Markup('\n'.join((wrapping % item for item in items)))
+
+
+def get_js_urls(bundle, debug=None):
+    """
+    Fetch URLs for the JS files in the requested bundle.
+
+    :param bundle:
+        Name of the bundle to fetch.
+
+    :param debug:
+        If True, return URLs for individual files instead of the minified
+        bundle.
+    """
+    if debug is None:
+        debug = settings.TEMPLATE_DEBUG
+
+    if debug:
+        # Add timestamp to avoid caching.
+        return [_get_item_path('%s?build=%s' % (item, _get_mtime(item))) for
+                item in settings.MINIFY_BUNDLES['js'][bundle]]
+    else:
+        build_id = BUILD_ID_JS
+        bundle_full = 'js:%s' % bundle
+        if bundle_full in BUNDLE_HASHES:
+            build_id = BUNDLE_HASHES[bundle_full]
+        return (_get_item_path('js/%s-min.js?build=%s' % (bundle, build_id,)),)
+
+
+def _get_compiled_css_url(item):
+    """
+    Compresses a preprocess file and returns its relative compressed URL.
+
+    :param item:
+        Name of the less/sass/stylus file to compress into css.
+    """
+    if ((item.endswith('.less') and
+            getattr(settings, 'LESS_PREPROCESS', False)) or
+            item.endswith(('.sass', '.scss', '.styl'))):
+        compile_css(item)
+        return item + '.css'
+    return item
+
+
+def get_css_urls(bundle, debug=None):
+    """
+    Fetch URLs for the CSS files in the requested bundle.
+
+    :param bundle:
+        Name of the bundle to fetch.
+
+    :param debug:
+        If True, return URLs for individual files instead of the minified
+        bundle.
+    """
+    if debug is None:
+        debug = settings.TEMPLATE_DEBUG
+
+    if debug:
+        items = []
+        for item in settings.MINIFY_BUNDLES['css'][bundle]:
+            if ((item.endswith('.less') and
+                    getattr(settings, 'LESS_PREPROCESS', False)) or
+                    item.endswith(('.sass', '.scss', '.styl'))):
+                compile_css(item)
+                items.append('%s.css' % item)
+            else:
+                items.append(item)
+        # Add timestamp to avoid caching.
+        return [_get_item_path('%s?build=%s' % (item, _get_mtime(item))) for
+                item in items]
+    else:
+        build_id = BUILD_ID_CSS
+        bundle_full = 'css:%s' % bundle
+        if bundle_full in BUNDLE_HASHES:
+            build_id = BUNDLE_HASHES[bundle_full]
+        return (_get_item_path('css/%s-min.css?build=%s' %
+                               (bundle, build_id)),)
+
+
+@register.function
+def js(bundle, debug=None, defer=False, async=False):
+    """
+    If we are in debug mode, just output a single script tag for each js file.
+    If we are not in debug mode, return a script that points at bundle-min.js.
+    """
+    attrs = []
+    urls = get_js_urls(bundle, debug)
+
+    attrs.append('src="%s"')
+
+    if defer:
+        attrs.append('defer')
+
+    if async:
+        attrs.append('async')
+
+    return _build_html(urls, '<script %s></script>' % ' '.join(attrs))
+
+
+@register.function
+def css(bundle, media=False, debug=None):
+    """
+    If we are in debug mode, just output a single script tag for each css file.
+    If we are not in debug mode, return a script that points at bundle-min.css.
+    """
+    urls = get_css_urls(bundle, debug)
+    if not media:
+        media = getattr(settings, 'CSS_MEDIA_DEFAULT', 'screen,projection,tv')
+
+    return _build_html(urls, '<link rel="stylesheet" media="%s" href="%%s" />'
+                             % media)
+
+
+@register.function
+def inline_css(bundle, media=False, debug=None):
+    """
+    If we are in debug mode, just output a single style tag for each css file.
+    If we are not in debug mode, return a style that contains bundle-min.css.
+    Forces a regular css() call for external URLs (no inline allowed).
+    """
+    if debug is None:
+        debug = getattr(settings, 'TEMPLATE_DEBUG', False)
+
+    if debug:
+        items = [_get_compiled_css_url(i)
+                 for i in settings.MINIFY_BUNDLES['css'][bundle]]
+    else:
+        items = ['css/%s-min.css' % bundle]
+
+    if not media:
+        media = getattr(settings, 'CSS_MEDIA_DEFAULT', 'screen,projection,tv')
+
+    contents = []
+    for css in items:
+        if is_external(css):
+            return _build_html([css], '<link rel="stylesheet" media="%s" '
+                                      'href="%%s" />' % media)
+        with open(get_path(css), 'r') as f:
+            contents.append(f.read())
+
+    return _build_html(contents, '<style type="text/css" media="%s">%%s'
+                                 '</style>' % media)
+
+
+def ensure_path_exists(path):
+    try:
+        os.makedirs(path)
+    except OSError as e:
+        # If the directory already exists, that is fine. Otherwise re-raise.
+        if e.errno != os.errno.EEXIST:
+            raise
+
+
+def compile_css(item):
+    path_src = get_path(item)
+    path_dst = get_path('%s.css' % item)
+
+    updated_src = os.path.getmtime(get_path(item))
+    updated_css = 0  # If the file doesn't exist, force a refresh.
+    if os.path.exists(path_dst):
+        updated_css = os.path.getmtime(path_dst)
+
+    # Is the uncompiled version newer?  Then recompile!
+    if not updated_css or updated_src > updated_css:
+        ensure_path_exists(os.path.dirname(path_dst))
+        if item.endswith('.less'):
+            with open(path_dst, 'w') as output:
+                subprocess.Popen([settings.LESS_BIN, path_src], stdout=output)
+        elif item.endswith(('.sass', '.scss')):
+            with open(path_dst, 'w') as output:
+                subprocess.Popen([settings.SASS_BIN, path_src], stdout=output)
+        elif item.endswith('.styl'):
+            subprocess.call('%s --include-css --include %s < %s > %s' %
+                            (settings.STYLUS_BIN, os.path.dirname(path_src),
+                             path_src, path_dst), shell=True)
+
+
+def build_ids(request):
+    """A context processor for injecting the css/js build ids."""
+    return {'BUILD_ID_CSS': BUILD_ID_CSS, 'BUILD_ID_JS': BUILD_ID_JS,
+            'BUILD_ID_IMG': BUILD_ID_IMG}
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+'''
+Determine whether an integer is a palindrome. Do this without extra space.
+
+Could negative integers be palindromes? (ie, -1)
+
+If you are thinking of converting the integer to string, note the restriction of using extra space.
+
+You could also try reversing an integer. However, if you have solved the problem "Reverse Integer", you know that the reversed integer might overflow. How would you handle such case?
+
+There is a more generic way of solving this problem.
+'''
+
+class Solution(object):
+    def isPalindrome(self, x):
+        """
+        :type x: int
+        :rtype: bool
+        """
+        if x < 0:
+            return False
+        div = 1
+        while x / div >= 10:
+            div *= 10
+        while x > 0:
+            l = x // div
+            r = x % 10
+
+            if l != r:
+                return False
+            x %= div
+            x //= 10
+            div /= 100
+        return True
+
+
+if __name__ == "__main__":
+    assert Solution().isPalindrome(123) == False
+    assert Solution().isPalindrome(12321) == True
+    assert Solution().isPalindrome(-121) == False
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+from cryptoconditions.exceptions import UnsupportedTypeError
+
+
+# https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER
+# we don't use sys.maxint (= 2 ** 63 - 1) as this spec is in line with the ILP JavaScript reference implementation
+# see https://interledger.org/
+MAX_SAFE_INTEGER_JS = 2 ** 53 - 1
+
+
+class TypeRegistry:
+    """ """
+    registered_types = []
+
+    @staticmethod
+    def find_by_type_id(type_id):
+        """
+        Determine fulfillment implementation class from a bitmask.
+
+        Returns the class implementing a fulfillment type that matches a certain type ID.
+
+        Args:
+            type_id (int): fulfillment type ID
+
+        Return:
+            Class implementing the given fulfillment type.
+        """
+        # Determine type of condition
+        if type_id > MAX_SAFE_INTEGER_JS:
+            raise UnsupportedTypeError(
+                'Type {} is not supported'.format(type_id))
+
+        for registered_type in TypeRegistry.registered_types:
+            if type_id == registered_type['type_id']:
+                return registered_type
+
+        raise UnsupportedTypeError('Type {} is not supported'.format(type_id))
+
+    @staticmethod
+    def find_by_name(name):
+        for registered_type in TypeRegistry.registered_types:
+            if name == registered_type['name']:
+                return registered_type
+
+        raise UnsupportedTypeError('Type {} is not supported'.format(name))
+
+    @staticmethod
+    def find_by_asn1_type(asn1_type):
+        for registered_type in TypeRegistry.registered_types:
+            if asn1_type == registered_type['asn1']:
+                return registered_type
+
+        raise UnsupportedTypeError(
+            'Type {} is not supported'.format(asn1_type))
+
+    @staticmethod
+    def find_by_asn1_condition_type(asn1_type):
+        for registered_type in TypeRegistry.registered_types:
+            if asn1_type == registered_type['asn1_condition']:
+                return registered_type
+
+        raise UnsupportedTypeError(
+            'Type {} is not supported'.format(asn1_type))
+
+    @staticmethod
+    def find_by_asn1_fulfillment_type(asn1_type):
+        for registered_type in TypeRegistry.registered_types:
+            if asn1_type == registered_type['asn1_fulfillment']:
+                return registered_type
+
+        raise UnsupportedTypeError(
+            'Type {} is not supported'.format(asn1_type))
+
+    @staticmethod
+    def register_type(cls):
+        """
+        Add a new fulfillment type.
+
+        This can be used to extend this cryptocondition implementation with new
+        fulfillment types that it does not yet support. But mostly it is used
+        internally to register the built-in types.
+
+        In this method, we expect a regular fulfillment type, for information on
+        registering meta types please see `registerMetaType`.
+
+        Args:
+           cls: Implementation of a fulfillment type.
+        """
+        # TODO Do some sanity checks on Class
+
+        TypeRegistry.registered_types.append(
+            {
+                'type_id': cls.TYPE_ID,
+                'name': cls.TYPE_NAME,
+                'asn1': cls.TYPE_ASN1,
+                'asn1_condition': cls.TYPE_ASN1_CONDITION,
+                'asn1_fulfillment': cls.TYPE_ASN1_FULFILLMENT,
+                'class': cls
+            })
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+#
+# Fuel documentation build configuration file, created by
+# sphinx-quickstart2 on Wed Oct  8 17:59:44 2014.
+#
+# This file is execfile()d with the current directory set to its
+# containing dir.
+#
+# Note that not all possible configuration values are present in this
+# autogenerated file.
+#
+# All configuration values have a default; values that are commented out
+# serve to show the default.
+
+import inspect
+import os
+import sys
+from mock import Mock as MagicMock
+from sphinx.ext.autodoc import cut_lines
+
+# If extensions (or modules to document with autodoc) are in another directory,
+# add these directories to sys.path here. If the directory is relative to the
+# documentation root, use os.path.abspath to make it absolute, like shown here.
+sys.path.insert(0, os.path.abspath('..'))
+
+# -- General configuration ------------------------------------------------
+
+# If your documentation needs a minimal Sphinx version, state it here.
+# needs_sphinx = '1.0'
+
+# Add any Sphinx extension module names here, as strings. They can be
+# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
+# ones.
+
+# on_rtd is whether we are on readthedocs.org
+on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
+
+if not on_rtd:  # only import and set the theme if we're building docs locally
+    import sphinx_rtd_theme
+    html_theme = 'sphinx_rtd_theme'
+    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+
+extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.doctest',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.todo',
+    'sphinx.ext.mathjax',
+    'sphinx.ext.graphviz',
+    'sphinx.ext.intersphinx',
+    'matplotlib.sphinxext.plot_directive',
+    'sphinx.ext.linkcode'
+]
+
+intersphinx_mapping = {
+    'theano': ('http://theano.readthedocs.org/en/latest/', None),
+    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    'scipy': ('http://docs.scipy.org/doc/scipy/reference/', None),
+    'python': ('http://docs.python.org/3.4', None),
+    'pandas': ('http://pandas.pydata.org/pandas-docs/stable/', None)
+}
+
+class Mock(MagicMock):
+    @classmethod
+    def __getattr__(cls, name):
+            return Mock()
+
+MOCK_MODULES = ['h5py', 'zmq']
+sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
+
+graphviz_dot_args = ['-Gbgcolor=# fcfcfc']  # To match the RTD theme
+
+# Render todo lists
+todo_include_todos = True
+
+# Add any paths that contain templates here, relative to this directory.
+templates_path = ['_templates']
+
+# The suffix of source filenames.
+source_suffix = '.rst'
+
+# The encoding of source files.
+# source_encoding = 'utf-8-sig'
+
+# The master toctree document.
+master_doc = 'index'
+
+# General information about the project.
+project = u'Fuel'
+copyright = u'2014, Université de Montréal'
+
+# The version info for the project you're documenting, acts as replacement for
+# |version| and |release|, also used in various other places throughout the
+# built documents.
+#
+# The short X.Y version.
+import fuel
+version = '.'.join(fuel.__version__.split('.')[:2])
+# The full version, including alpha/beta/rc tags.
+release = fuel.__version__
+
+# The language for content autogenerated by Sphinx. Refer to documentation
+# for a list of supported languages.
+# language = None
+
+# There are two options for replacing |today|: either, you set today to some
+# non-false value, then it is used:
+# today = ''
+# Else, today_fmt is used as the format for a strftime call.
+# today_fmt = '%B %d, %Y'
+
+# List of patterns, relative to source directory, that match files and
+# directories to ignore when looking for source files.
+exclude_patterns = ['_build']
+
+# The reST default role (used for this markup: `text`) to use for all
+# documents.
+# default_role = None
+
+# If true, '()' will be appended to :func: etc. cross-reference text.
+# add_function_parentheses = True
+
+# If true, the current module name will be prepended to all description
+# unit titles (such as .. function::).
+# add_module_names = True
+
+# If true, sectionauthor and moduleauthor directives will be shown in the
+# output. They are ignored by default.
+# show_authors = False
+
+# The name of the Pygments (syntax highlighting) style to use.
+pygments_style = 'sphinx'
+
+# A list of ignored prefixes for module index sorting.
+# modindex_common_prefix = []
+
+# If true, keep warnings as "system message" paragraphs in the built documents.
+# keep_warnings = False
+
+
+# -- Options for HTML output ----------------------------------------------
+
+# The theme to use for HTML and HTML Help pages.  See the documentation for
+# a list of builtin themes.
+# html_theme = 'default'
+
+# Theme options are theme-specific and customize the look and feel of a theme
+# further.  For a list of options available for each theme, see the
+# documentation.
+# html_theme_options = {}
+
+# Add any paths that contain custom themes here, relative to this directory.
+# html_theme_path = []
+
+# The name for this set of Sphinx documents.  If None, it defaults to
+# "<project> v<release> documentation".
+# html_title = None
+
+# A shorter title for the navigation bar.  Default is the same as html_title.
+# html_short_title = None
+
+# The name of an image file (relative to this directory) to place at the top
+# of the sidebar.
+# html_logo = None
+
+# The name of an image file (within the static path) to use as favicon of the
+# docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
+# pixels large.
+# html_favicon = None
+
+# Add any paths that contain custom static files (such as style sheets) here,
+# relative to this directory. They are copied after the builtin static files,
+# so a file named "default.css" will overwrite the builtin "default.css".
+html_static_path = ['_static']
+
+# Add any extra paths that contain custom files (such as robots.txt or
+# .htaccess) here, relative to this directory. These files are copied
+# directly to the root of the documentation.
+# html_extra_path = []
+
+# If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
+# using the given strftime format.
+# html_last_updated_fmt = '%b %d, %Y'
+
+# If true, SmartyPants will be used to convert quotes and dashes to
+# typographically correct entities.
+# html_use_smartypants = True
+
+# Custom sidebar templates, maps document names to template names.
+# html_sidebars = {}
+
+# Additional templates that should be rendered to pages, maps page names to
+# template names.
+# html_additional_pages = {}
+
+# If false, no module index is generated.
+# html_domain_indices = True
+
+# If false, no index is generated.
+# html_use_index = True
+
+# If true, the index is split into individual pages for each letter.
+# html_split_index = False
+
+# If true, links to the reST sources are added to the pages.
+# html_show_sourcelink = True
+
+# If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
+# html_show_sphinx = True
+
+# If true, "(C) Copyright ..." is shown in the HTML footer. Default is True.
+# html_show_copyright = True
+
+# If true, an OpenSearch description file will be output, and all pages will
+# contain a <link> tag referring to it.  The value of this option must be the
+# base URL from which the finished HTML is served.
+# html_use_opensearch = ''
+
+# This is the file name suffix for HTML files (e.g. ".xhtml").
+# html_file_suffix = None
+
+# Output file base name for HTML help builder.
+htmlhelp_basename = 'Fueldoc'
+
+
+# -- Options for LaTeX output ---------------------------------------------
+
+latex_elements = {
+    # The paper size ('letterpaper' or 'a4paper').
+    # 'papersize': 'letterpaper',
+
+    # The font size ('10pt', '11pt' or '12pt').
+    # 'pointsize': '10pt',
+
+    # Additional stuff for the LaTeX preamble.
+    # 'preamble': '',
+}
+
+# Grouping the document tree into LaTeX files. List of tuples
+# (source start file, target name, title,
+#  author, documentclass [howto, manual, or own class]).
+latex_documents = [
+  ('index', 'Fuel.tex', u'Fuel Documentation',
+   u'Université de Montréal', 'manual'),
+]
+
+# The name of an image file (relative to this directory) to place at the top of
+# the title page.
+# latex_logo = None
+
+# For "manual" documents, if this is true, then toplevel headings are parts,
+# not chapters.
+# latex_use_parts = False
+
+# If true, show page references after internal links.
+# latex_show_pagerefs = False
+
+# If true, show URL addresses after external links.
+# latex_show_urls = False
+
+# Documents to append as an appendix to all manuals.
+# latex_appendices = []
+
+# If false, no module index is generated.
+# latex_domain_indices = True
+
+
+# -- Options for manual page output ---------------------------------------
+
+# One entry per manual page. List of tuples
+# (source start file, name, description, authors, manual section).
+man_pages = [
+    ('index', 'fuel', u'Fuel Documentation',
+     [u'Université de Montréal'], 1)
+]
+
+# If true, show URL addresses after external links.
+# man_show_urls = False
+
+
+# -- Options for Texinfo output -------------------------------------------
+
+# Grouping the document tree into Texinfo files. List of tuples
+# (source start file, target name, title, author,
+#  dir menu entry, description, category)
+texinfo_documents = [
+  ('index', 'Fuel', u'Fuel Documentation',
+   u'Université de Montréal', 'Fuel', 'One line description of project.',
+   'Miscellaneous'),
+]
+
+# Documents to append as an appendix to all manuals.
+# texinfo_appendices = []
+
+# If false, no module index is generated.
+# texinfo_domain_indices = True
+
+# How to display URL addresses: 'footnote', 'no', or 'inline'.
+# texinfo_show_urls = 'footnote'
+
+# If true, do not generate a @detailmenu in the "Top" node's menu.
+# texinfo_no_detailmenu = False
+
+
+def skip_abc(app, what, name, obj, skip, options):
+    return skip or name.startswith('_abc')
+
+
+def setup(app):
+    app.connect('autodoc-process-docstring', cut_lines(2, what=['module']))
+    app.connect('autodoc-skip-member', skip_abc)
+
+
+def linkcode_resolve(domain, info):
+    """
+    Determine the URL corresponding to Python object
+    """
+    if domain != 'py':
+        return None
+
+    modname = info['module']
+    fullname = info['fullname']
+
+    submod = sys.modules.get(modname)
+    if submod is None:
+        return None
+
+    obj = submod
+    for part in fullname.split('.'):
+        try:
+            obj = getattr(obj, part)
+        except:
+            return None
+    if hasattr(obj, '__wrapped__'):
+        obj = obj.__wrapped__
+
+    try:
+        fn = inspect.getsourcefile(obj)
+    except:
+        fn = None
+    if not fn:
+        return None
+
+    try:
+        _, lineno = inspect.findsource(obj)
+    except:
+        lineno = None
+
+    if lineno:
+        linespec = "#L%d" % (lineno + 1)
+    else:
+        linespec = ""
+
+    fn = os.path.relpath(fn, start=os.path.dirname(fuel.__file__))
+
+    github = "https://github.com/mila-udem/fuel/blob/master/fuel/{}{}"
+    return github.format(fn, linespec)
+
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+# coding=utf-8
+from __future__ import absolute_import
+
+import logging.handlers
+import os
+import re
+import time
+
+class CleaningTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
+
+	def __init__(self, *args, **kwargs):
+		logging.handlers.TimedRotatingFileHandler.__init__(self, *args, **kwargs)
+
+		# clean up old files on handler start
+		if self.backupCount > 0:
+			for s in self.getFilesToDelete():
+				os.remove(s)
+
+
+class OctoPrintLogHandler(CleaningTimedRotatingFileHandler):
+	rollover_callbacks = []
+
+	@classmethod
+	def registerRolloverCallback(cls, callback, *args, **kwargs):
+		cls.rollover_callbacks.append((callback, args, kwargs))
+
+	def doRollover(self):
+		CleaningTimedRotatingFileHandler.doRollover(self)
+
+		for rcb in self.__class__.rollover_callbacks:
+			callback, args, kwargs = rcb
+			callback(*args, **kwargs)
+
+
+class SerialLogHandler(logging.handlers.RotatingFileHandler):
+
+	_do_rollover = False
+	_suffix_template = "%Y-%m-%d_%H-%M-%S"
+	_file_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
+
+	@classmethod
+	def on_open_connection(cls):
+		cls._do_rollover = True
+
+	def __init__(self, *args, **kwargs):
+		logging.handlers.RotatingFileHandler.__init__(self, *args, **kwargs)
+		self.cleanupFiles()
+
+	def emit(self, record):
+		logging.handlers.RotatingFileHandler.emit(self, record)
+
+	def shouldRollover(self, record):
+		return self.__class__._do_rollover
+
+	def getFilesToDelete(self):
+		"""
+		Determine the files to delete when rolling over.
+		"""
+		dirName, baseName = os.path.split(self.baseFilename)
+		fileNames = os.listdir(dirName)
+		result = []
+		prefix = baseName + "."
+		plen = len(prefix)
+		for fileName in fileNames:
+			if fileName[:plen] == prefix:
+				suffix = fileName[plen:]
+				if self.__class__._file_pattern.match(suffix):
+					result.append(os.path.join(dirName, fileName))
+		result.sort()
+		if len(result) < self.backupCount:
+			result = []
+		else:
+			result = result[:len(result) - self.backupCount]
+		return result
+
+	def cleanupFiles(self):
+		if self.backupCount > 0:
+			for path in self.getFilesToDelete():
+				os.remove(path)
+
+	def doRollover(self):
+		self.__class__._do_rollover = False
+
+		if self.stream:
+			self.stream.close()
+			self.stream = None
+
+		if os.path.exists(self.baseFilename):
+			# figure out creation date/time to use for file suffix
+			t = time.localtime(os.stat(self.baseFilename).st_mtime)
+			dfn = self.baseFilename + "." + time.strftime(self.__class__._suffix_template, t)
+			if os.path.exists(dfn):
+				os.remove(dfn)
+			os.rename(self.baseFilename, dfn)
+
+		self.cleanupFiles()
+		if not self.delay:
+			self.stream = self._open()
+
+class RecordingLogHandler(logging.Handler):
+	def __init__(self, target=None, level=logging.NOTSET):
+		logging.Handler.__init__(self, level=level)
+		self._buffer = []
+		self._target = target
+
+	def emit(self, record):
+		self._buffer.append(record)
+
+	def setTarget(self, target):
+		self._target = target
+
+	def flush(self):
+		if not self._target:
+			return
+
+		self.acquire()
+		try:
+			for record in self._buffer:
+				self._target.handle(record)
+			self._buffer = []
+		finally:
+			self.release()
+
+	def close(self):
+		self.flush()
+		self.acquire()
+		try:
+			self._buffer = []
+		finally:
+			self.release()
+
+	def __len__(self):
+		return len(self._buffer)
+
+
+class CombinedLogHandler(logging.Handler):
+	def __init__(self, *handlers):
+		logging.Handler.__init__(self)
+		self._handlers = handlers
+
+	def setHandlers(self, *handlers):
+		self._handlers = handlers
+
+	def handle(self, record):
+		self.acquire()
+		try:
+			if self._handlers:
+				for handler in self._handlers:
+					handler.handle(record)
+		finally:
+			self.release()
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+from operator import attrgetter
+import inspect
+import subprocess
+import os
+import sys
+from functools import partial
+
+REVISION_CMD = 'git rev-parse --short HEAD'
+
+
+def _get_git_revision():
+    try:
+        revision = subprocess.check_output(REVISION_CMD.split()).strip()
+    except subprocess.CalledProcessError:
+        print('Failed to execute git to get revision')
+        return None
+    return revision.decode('utf-8')
+
+
+def _linkcode_resolve(domain, info, package, url_fmt, revision):
+    """Determine a link to online source for a class/method/function
+
+    This is called by sphinx.ext.linkcode
+
+    An example with a long-untouched module that everyone has
+    >>> _linkcode_resolve('py', {'module': 'tty',
+    ...                          'fullname': 'setraw'},
+    ...                   package='tty',
+    ...                   url_fmt='http://hg.python.org/cpython/file/'
+    ...                           '{revision}/Lib/{package}/{path}#L{lineno}',
+    ...                   revision='xxxx')
+    'http://hg.python.org/cpython/file/xxxx/Lib/tty/tty.py#L18'
+    """
+
+    if revision is None:
+        return
+    if domain not in ('py', 'pyx'):
+        return
+    if not info.get('module') or not info.get('fullname'):
+        return
+
+    class_name = info['fullname'].split('.')[0]
+    if type(class_name) != str:
+        # Python 2 only
+        class_name = class_name.encode('utf-8')
+    module = __import__(info['module'], fromlist=[class_name])
+    try:
+      obj = attrgetter(info['fullname'])(module)
+    except AttributeError:
+      return
+
+    try:
+        fn = inspect.getsourcefile(obj)
+    except Exception:
+        fn = None
+    if not fn:
+        try:
+            fn = inspect.getsourcefile(sys.modules[obj.__module__])
+        except Exception:
+            fn = None
+    if not fn:
+        return
+
+    fn = os.path.relpath(fn,
+                         start=os.path.dirname(__import__(package).__file__))
+    try:
+        lineno = inspect.getsourcelines(obj)[1]
+    except Exception:
+        lineno = ''
+    return url_fmt.format(revision=revision, package=package,
+                          path=fn, lineno=lineno)
+
+
+def make_linkcode_resolve(package, url_fmt):
+    """Returns a linkcode_resolve function for the given URL format
+
+    revision is a git commit reference (hash or name)
+
+    package is the name of the root module of the package
+
+    url_fmt is along the lines of ('https://github.com/USER/PROJECT/'
+                                   'blob/{revision}/{package}/'
+                                   '{path}#L{lineno}')
+    """
+    revision = _get_git_revision()
+    return partial(_linkcode_resolve, revision=revision, package=package,
+                   url_fmt=url_fmt)
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+# Authors: Fabian Pedregosa <fabian@fseoane.net>
+#          Alexandre Gramfort <alexandre.gramfort@inria.fr>
+#          Nelle Varoquaux <nelle.varoquaux@gmail.com>
+# License: BSD 3 clause
+
+import numpy as np
+from scipy import interpolate
+from scipy.stats import spearmanr
+from .base import BaseEstimator, TransformerMixin, RegressorMixin
+from .utils import as_float_array, check_array, check_consistent_length
+from .utils import deprecated
+from .utils.fixes import astype
+from ._isotonic import _isotonic_regression, _make_unique
+import warnings
+import math
+
+
+__all__ = ['check_increasing', 'isotonic_regression',
+           'IsotonicRegression']
+
+
+def check_increasing(x, y):
+    """Determine whether y is monotonically correlated with x.
+
+    y is found increasing or decreasing with respect to x based on a Spearman
+    correlation test.
+
+    Parameters
+    ----------
+    x : array-like, shape=(n_samples,)
+            Training data.
+
+    y : array-like, shape=(n_samples,)
+        Training target.
+
+    Returns
+    -------
+    `increasing_bool` : boolean
+        Whether the relationship is increasing or decreasing.
+
+    Notes
+    -----
+    The Spearman correlation coefficient is estimated from the data, and the
+    sign of the resulting estimate is used as the result.
+
+    In the event that the 95% confidence interval based on Fisher transform
+    spans zero, a warning is raised.
+
+    References
+    ----------
+    Fisher transformation. Wikipedia.
+    http://en.wikipedia.org/w/index.php?title=Fisher_transformation
+    """
+
+    # Calculate Spearman rho estimate and set return accordingly.
+    rho, _ = spearmanr(x, y)
+    increasing_bool = rho >= 0
+
+    # Run Fisher transform to get the rho CI, but handle rho=+/-1
+    if rho not in [-1.0, 1.0]:
+        F = 0.5 * math.log((1. + rho) / (1. - rho))
+        F_se = 1 / math.sqrt(len(x) - 3)
+
+        # Use a 95% CI, i.e., +/-1.96 S.E.
+        # http://en.wikipedia.org/wiki/Fisher_transformation
+        rho_0 = math.tanh(F - 1.96 * F_se)
+        rho_1 = math.tanh(F + 1.96 * F_se)
+
+        # Warn if the CI spans zero.
+        if np.sign(rho_0) != np.sign(rho_1):
+            warnings.warn("Confidence interval of the Spearman "
+                          "correlation coefficient spans zero. "
+                          "Determination of ``increasing`` may be "
+                          "suspect.")
+
+    return increasing_bool
+
+
+def isotonic_regression(y, sample_weight=None, y_min=None, y_max=None,
+                        increasing=True):
+    """Solve the isotonic regression model::
+
+        min sum w[i] (y[i] - y_[i]) ** 2
+
+        subject to y_min = y_[1] <= y_[2] ... <= y_[n] = y_max
+
+    where:
+        - y[i] are inputs (real numbers)
+        - y_[i] are fitted
+        - w[i] are optional strictly positive weights (default to 1.0)
+
+    Read more in the :ref:`User Guide <isotonic>`.
+
+    Parameters
+    ----------
+    y : iterable of floating-point values
+        The data.
+
+    sample_weight : iterable of floating-point values, optional, default: None
+        Weights on each point of the regression.
+        If None, weight is set to 1 (equal weights).
+
+    y_min : optional, default: None
+        If not None, set the lowest value of the fit to y_min.
+
+    y_max : optional, default: None
+        If not None, set the highest value of the fit to y_max.
+
+    increasing : boolean, optional, default: True
+        Whether to compute ``y_`` is increasing (if set to True) or decreasing
+        (if set to False)
+
+    Returns
+    -------
+    y_ : list of floating-point values
+        Isotonic fit of y.
+
+    References
+    ----------
+    "Active set algorithms for isotonic regression; A unifying framework"
+    by Michael J. Best and Nilotpal Chakravarti, section 3.
+    """
+    y = np.asarray(y, dtype=np.float64)
+    if sample_weight is None:
+        sample_weight = np.ones(len(y), dtype=y.dtype)
+    else:
+        sample_weight = np.asarray(sample_weight, dtype=np.float64)
+    if not increasing:
+        y = y[::-1]
+        sample_weight = sample_weight[::-1]
+
+    if y_min is not None or y_max is not None:
+        y = np.copy(y)
+        sample_weight = np.copy(sample_weight)
+        # upper bound on the cost function
+        C = np.dot(sample_weight, y * y) * 10
+        if y_min is not None:
+            y[0] = y_min
+            sample_weight[0] = C
+        if y_max is not None:
+            y[-1] = y_max
+            sample_weight[-1] = C
+
+    solution = np.empty(len(y))
+    y_ = _isotonic_regression(y, sample_weight, solution)
+    if increasing:
+        return y_
+    else:
+        return y_[::-1]
+
+
+class IsotonicRegression(BaseEstimator, TransformerMixin, RegressorMixin):
+    """Isotonic regression model.
+
+    The isotonic regression optimization problem is defined by::
+
+        min sum w_i (y[i] - y_[i]) ** 2
+
+        subject to y_[i] <= y_[j] whenever X[i] <= X[j]
+        and min(y_) = y_min, max(y_) = y_max
+
+    where:
+        - ``y[i]`` are inputs (real numbers)
+        - ``y_[i]`` are fitted
+        - ``X`` specifies the order.
+          If ``X`` is non-decreasing then ``y_`` is non-decreasing.
+        - ``w[i]`` are optional strictly positive weights (default to 1.0)
+
+    Read more in the :ref:`User Guide <isotonic>`.
+
+    Parameters
+    ----------
+    y_min : optional, default: None
+        If not None, set the lowest value of the fit to y_min.
+
+    y_max : optional, default: None
+        If not None, set the highest value of the fit to y_max.
+
+    increasing : boolean or string, optional, default: True
+        If boolean, whether or not to fit the isotonic regression with y
+        increasing or decreasing.
+
+        The string value "auto" determines whether y should
+        increase or decrease based on the Spearman correlation estimate's
+        sign.
+
+    out_of_bounds : string, optional, default: "nan"
+        The ``out_of_bounds`` parameter handles how x-values outside of the
+        training domain are handled.  When set to "nan", predicted y-values
+        will be NaN.  When set to "clip", predicted y-values will be
+        set to the value corresponding to the nearest train interval endpoint.
+        When set to "raise", allow ``interp1d`` to throw ValueError.
+
+
+    Attributes
+    ----------
+    X_min_ : float
+        Minimum value of input array `X_` for left bound.
+
+    X_max_ : float
+        Maximum value of input array `X_` for right bound.
+
+    f_ : function
+        The stepwise interpolating function that covers the domain `X_`.
+
+    Notes
+    -----
+    Ties are broken using the secondary method from Leeuw, 1977.
+
+    References
+    ----------
+    Isotonic Median Regression: A Linear Programming Approach
+    Nilotpal Chakravarti
+    Mathematics of Operations Research
+    Vol. 14, No. 2 (May, 1989), pp. 303-308
+
+    Isotone Optimization in R : Pool-Adjacent-Violators
+    Algorithm (PAVA) and Active Set Methods
+    Leeuw, Hornik, Mair
+    Journal of Statistical Software 2009
+
+    Correctness of Kruskal's algorithms for monotone regression with ties
+    Leeuw, Psychometrica, 1977
+    """
+    def __init__(self, y_min=None, y_max=None, increasing=True,
+                 out_of_bounds='nan'):
+        self.y_min = y_min
+        self.y_max = y_max
+        self.increasing = increasing
+        self.out_of_bounds = out_of_bounds
+
+    @property
+    @deprecated("Attribute ``X_`` is deprecated in version 0.18 and will be"
+                " removed in version 0.20.")
+    def X_(self):
+        return self._X_
+
+    @X_.setter
+    def X_(self, value):
+        self._X_ = value
+
+    @X_.deleter
+    def X_(self):
+        del self._X_
+
+    @property
+    @deprecated("Attribute ``y_`` is deprecated in version 0.18 and will"
+                " be removed in version 0.20.")
+    def y_(self):
+        return self._y_
+
+    @y_.setter
+    def y_(self, value):
+        self._y_ = value
+
+    @y_.deleter
+    def y_(self):
+        del self._y_
+
+    def _check_fit_data(self, X, y, sample_weight=None):
+        if len(X.shape) != 1:
+            raise ValueError("X should be a 1d array")
+
+    def _build_f(self, X, y):
+        """Build the f_ interp1d function."""
+
+        # Handle the out_of_bounds argument by setting bounds_error
+        if self.out_of_bounds not in ["raise", "nan", "clip"]:
+            raise ValueError("The argument ``out_of_bounds`` must be in "
+                             "'nan', 'clip', 'raise'; got {0}"
+                             .format(self.out_of_bounds))
+
+        bounds_error = self.out_of_bounds == "raise"
+        if len(y) == 1:
+            # single y, constant prediction
+            self.f_ = lambda x: y.repeat(x.shape)
+        else:
+            self.f_ = interpolate.interp1d(X, y, kind='linear',
+                                           bounds_error=bounds_error)
+
+    def _build_y(self, X, y, sample_weight, trim_duplicates=True):
+        """Build the y_ IsotonicRegression."""
+        check_consistent_length(X, y, sample_weight)
+        X, y = [check_array(x, ensure_2d=False) for x in [X, y]]
+
+        y = as_float_array(y)
+        self._check_fit_data(X, y, sample_weight)
+
+        # Determine increasing if auto-determination requested
+        if self.increasing == 'auto':
+            self.increasing_ = check_increasing(X, y)
+        else:
+            self.increasing_ = self.increasing
+
+        # If sample_weights is passed, removed zero-weight values and clean
+        # order
+        if sample_weight is not None:
+            sample_weight = check_array(sample_weight, ensure_2d=False)
+            mask = sample_weight > 0
+            X, y, sample_weight = X[mask], y[mask], sample_weight[mask]
+        else:
+            sample_weight = np.ones(len(y))
+
+        order = np.lexsort((y, X))
+        X, y, sample_weight = [astype(array[order], np.float64, copy=False)
+                               for array in [X, y, sample_weight]]
+        unique_X, unique_y, unique_sample_weight = _make_unique(
+            X, y, sample_weight)
+
+        # Store _X_ and _y_ to maintain backward compat during the deprecation
+        # period of X_ and y_
+        self._X_ = X = unique_X
+        self._y_ = y = isotonic_regression(unique_y, unique_sample_weight,
+                                           self.y_min, self.y_max,
+                                           increasing=self.increasing_)
+
+        # Handle the left and right bounds on X
+        self.X_min_, self.X_max_ = np.min(X), np.max(X)
+
+        if trim_duplicates:
+            # Remove unnecessary points for faster prediction
+            keep_data = np.ones((len(y),), dtype=bool)
+            # Aside from the 1st and last point, remove points whose y values
+            # are equal to both the point before and the point after it.
+            keep_data[1:-1] = np.logical_or(
+                np.not_equal(y[1:-1], y[:-2]),
+                np.not_equal(y[1:-1], y[2:])
+            )
+            return X[keep_data], y[keep_data]
+        else:
+            # The ability to turn off trim_duplicates is only used to it make
+            # easier to unit test that removing duplicates in y does not have
+            # any impact the resulting interpolation function (besides
+            # prediction speed).
+            return X, y
+
+    def fit(self, X, y, sample_weight=None):
+        """Fit the model using X, y as training data.
+
+        Parameters
+        ----------
+        X : array-like, shape=(n_samples,)
+            Training data.
+
+        y : array-like, shape=(n_samples,)
+            Training target.
+
+        sample_weight : array-like, shape=(n_samples,), optional, default: None
+            Weights. If set to None, all weights will be set to 1 (equal
+            weights).
+
+        Returns
+        -------
+        self : object
+            Returns an instance of self.
+
+        Notes
+        -----
+        X is stored for future use, as `transform` needs X to interpolate
+        new input data.
+        """
+        # Transform y by running the isotonic regression algorithm and
+        # transform X accordingly.
+        X, y = self._build_y(X, y, sample_weight)
+
+        # It is necessary to store the non-redundant part of the training set
+        # on the model to make it possible to support model persistence via
+        # the pickle module as the object built by scipy.interp1d is not
+        # picklable directly.
+        self._necessary_X_, self._necessary_y_ = X, y
+
+        # Build the interpolation function
+        self._build_f(X, y)
+        return self
+
+    def transform(self, T):
+        """Transform new data by linear interpolation
+
+        Parameters
+        ----------
+        T : array-like, shape=(n_samples,)
+            Data to transform.
+
+        Returns
+        -------
+        T_ : array, shape=(n_samples,)
+            The transformed data
+        """
+        T = as_float_array(T)
+        if len(T.shape) != 1:
+            raise ValueError("Isotonic regression input should be a 1d array")
+
+        # Handle the out_of_bounds argument by clipping if needed
+        if self.out_of_bounds not in ["raise", "nan", "clip"]:
+            raise ValueError("The argument ``out_of_bounds`` must be in "
+                             "'nan', 'clip', 'raise'; got {0}"
+                             .format(self.out_of_bounds))
+
+        if self.out_of_bounds == "clip":
+            T = np.clip(T, self.X_min_, self.X_max_)
+        return self.f_(T)
+
+    def predict(self, T):
+        """Predict new data by linear interpolation.
+
+        Parameters
+        ----------
+        T : array-like, shape=(n_samples,)
+            Data to transform.
+
+        Returns
+        -------
+        T_ : array, shape=(n_samples,)
+            Transformed data.
+        """
+        return self.transform(T)
+
+    def __getstate__(self):
+        """Pickle-protocol - return state of the estimator. """
+        # copy __dict__
+        state = dict(self.__dict__)
+        # remove interpolation method
+        state.pop('f_', None)
+        return state
+
+    def __setstate__(self, state):
+        """Pickle-protocol - set state of the estimator.
+
+        We need to rebuild the interpolation function.
+        """
+        self.__dict__.update(state)
+        self._build_f(self._necessary_X_, self._necessary_y_)
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+import os
+import subprocess
+import time
+
+from django.conf import settings
+from django.contrib.staticfiles.finders import find as find_static_path
+
+import jinja2
+
+try:
+    from build import BUILD_ID_CSS, BUILD_ID_JS, BUILD_ID_IMG, BUNDLE_HASHES
+except ImportError:
+    BUILD_ID_CSS = BUILD_ID_JS = BUILD_ID_IMG = 'dev'
+    BUNDLE_HASHES = {}
+
+
+def is_external(url):
+    """
+    Determine if it is an external URL.
+    """
+    return url.startswith(('//', 'http://', 'https://'))
+
+
+def _get_item_path(item):
+    """
+    Determine whether to return a relative path or a URL.
+    """
+    if is_external(item):
+        return item
+    return settings.STATIC_URL + item
+
+
+def _get_mtime(item):
+    """Get a last-changed timestamp for development."""
+    if item.startswith(('//', 'http://', 'https://')):
+        return int(time.time())
+    return int(os.path.getmtime(find_static_path(item)))
+
+
+def _build_html(items, wrapping):
+    """
+    Wrap `items` in wrapping.
+    """
+    return jinja2.Markup('\n'.join((wrapping % item for item in items)))
+
+
+def ensure_path_exists(path):
+    try:
+        os.makedirs(os.path.dirname(path))
+    except OSError as e:
+        # If the directory already exists, that is fine. Otherwise re-raise.
+        if e.errno != os.errno.EEXIST:
+            raise
+
+    return path
+
+
+def get_js_urls(bundle, debug=None):
+    """
+    Fetch URLs for the JS files in the requested bundle.
+
+    :param bundle:
+        Name of the bundle to fetch.
+
+    :param debug:
+        If True, return URLs for individual files instead of the minified
+        bundle.
+    """
+    if debug is None:
+        debug = settings.DEBUG
+
+    if debug:
+        # Add timestamp to avoid caching.
+        return [_get_item_path('%s?build=%s' % (item, _get_mtime(item))) for
+                item in settings.MINIFY_BUNDLES['js'][bundle]]
+    else:
+        build_id = BUILD_ID_JS
+        bundle_full = 'js:%s' % bundle
+        if bundle_full in BUNDLE_HASHES:
+            build_id = BUNDLE_HASHES[bundle_full]
+        return (_get_item_path('js/%s-min.js?build=%s' % (bundle, build_id,)),)
+
+
+def get_css_urls(bundle, debug=None):
+    """
+    Fetch URLs for the CSS files in the requested bundle.
+
+    :param bundle:
+        Name of the bundle to fetch.
+
+    :param debug:
+        If True, return URLs for individual files instead of the minified
+        bundle.
+    """
+    if debug is None:
+        debug = settings.DEBUG
+
+    if debug:
+        items = []
+        for item in settings.MINIFY_BUNDLES['css'][bundle]:
+            should_compile = (
+                item.endswith('.less') and
+                getattr(settings, 'LESS_PREPROCESS', False))
+
+            if should_compile:
+                compile_css(item)
+                items.append('%s.css' % item)
+            else:
+                items.append(item)
+        # Add timestamp to avoid caching.
+        return [_get_item_path('%s?build=%s' % (item, _get_mtime(item))) for
+                item in items]
+    else:
+        build_id = BUILD_ID_CSS
+        bundle_full = 'css:%s' % bundle
+        if bundle_full in BUNDLE_HASHES:
+            build_id = BUNDLE_HASHES[bundle_full]
+        return (_get_item_path('css/%s-min.css?build=%s' %
+                               (bundle, build_id)),)
+
+
+def compile_css(item):
+    path_src = find_static_path(item)
+    path_dst = os.path.join(
+        settings.ROOT, 'static', '%s.css' % item)
+
+    updated_src = os.path.getmtime(find_static_path(item))
+    updated_dst = 0  # If the file doesn't exist, force a refresh.
+    if os.path.exists(path_dst):
+        updated_dst = os.path.getmtime(path_dst)
+
+    # Is the uncompiled version newer?  Then recompile!
+    if not updated_dst or updated_src > updated_dst:
+        ensure_path_exists(os.path.dirname(path_dst))
+        if item.endswith('.less'):
+            with open(path_dst, 'w') as output:
+                subprocess.Popen([settings.LESS_BIN, path_src], stdout=output)
+
+
+def build_ids(request):
+    """A context processor for injecting the css/js build ids."""
+    return {'BUILD_ID_CSS': BUILD_ID_CSS, 'BUILD_ID_JS': BUILD_ID_JS,
+            'BUILD_ID_IMG': BUILD_ID_IMG}
+
+Query: determine if a Sudoku is valid
+
+************************** NEXT RESULT **************************************
+from itertools import tee
+
+def esri2geojson(esrijson_feature):
+    response = dict(type="Feature", geometry=None, properties=None)
+
+    geojson_geometry = convert_esri_geometry(esrijson_feature.get('geometry'))
+    if geojson_geometry:
+        response['geometry'] = geojson_geometry
+
+    esri_attributes = esrijson_feature.get('attributes')
+    if esri_attributes:
+        response['properties'] = esri_attributes
+
+    return response
+
+def convert_esri_geometry(esri_geometry):
+    if esri_geometry is None:
+        return esri_geometry
+    elif 'x' in esri_geometry or 'y' in esri_geometry:
+        return convert_esri_point(esri_geometry)
+    elif 'points' in esri_geometry:
+        return convert_esri_multipoint(esri_geometry)
+    elif 'paths' in esri_geometry:
+        return convert_esri_polyline(esri_geometry)
+    elif 'rings' in esri_geometry:
+        return convert_esri_polygon(esri_geometry)
+
+def convert_esri_point(esri_geometry):
+    x_coord = esri_geometry.get('x')
+    y_coord = esri_geometry.get('y')
+
+    if x_coord and y_coord:
+        return {
+            "type": "Point",
+            "coordinates": [x_coord, y_coord]
+        }
+    else:
+        return None
+
+def convert_esri_multipoint(esri_geometry):
+    points = esri_geometry.get('points')
+
+    if len(points) == 1:
+        return {
+            "type": "Point",
+            "coordinates": points[0]
+        }
+    else:
+        return {
+            "type": "MultiPoint",
+            "coordinates": points
+        }
+
+def convert_esri_polyline(esri_geometry):
+    paths = esri_geometry.get('paths')
+
+    if len(paths) == 1:
+        return {
+            "type": "LineString",
+            "coordinates": paths[0]
+        }
+    else:
+        return {
+            "type": "MultiLineString",
+            "coordinates": paths
+        }
+
+def convert_esri_polygon(esri_geometry):
+    rings = esri_geometry.get('rings')
+
+    def ensure_closed_ring(ring):
+        first = ring[0]
+        last = ring[-1]
+
+        if first != last:
+            # Trickery here to not modify the passed-in list
+            ring = list(ring)
+            ring.append(ring[0])
+
+        return ring
+
+    def is_valid_ring(ring):
+        return not (len(ring) == 3 and ring[0] == ring[2])
+
+    clean_rings = [
+        ensure_closed_ring(ring)
+        for ring in filter(is_valid_ring, rings)
+    ]
+
+    if len(clean_rings) == 1:
+        return {
+            "type": "Polygon",
+            "coordinates": clean_rings
+        }
+    elif len(clean_rings) == 0:
+        return None
+    else:
+        return decode_polygon(clean_rings)
+
+def decode_polygon(esri_rings):
+    coords = []
+    outer_ring_index = -1
+
+    for ring in esri_rings:
+        try:
+            if ring_is_clockwise(ring):
+                coords.append([ring])
+                outer_ring_index += 1
+            else:
+                coords[outer_ring_index].append(ring)
+        except IndexError:
+            # Skip over rings that are in an unexpected order
+            continue
+
+    if len(coords) == 1:
+        return {
+            "type": "Polygon",
+            "coordinates": coords[0]
+        }
+    else:
+        return {
+            "type": "MultiPolygon",
+            "coordinates": coords
+        }
+
+def ring_is_clockwise(ring):
+    """
+    Determine if polygon ring coordinates are clockwise. Clockwise signifies
+    outer ring, counter-clockwise an inner ring or hole. this logic was found
+    at http://stackoverflow.com/questions/1165647/how-to-determine-if-a-list-of-polygon-points-are-in-clockwise-order
+    this code taken from http://esri.github.com/geojson-utils/src/jsonConverters.js by James Cardona (MIT lisense)
+    """
+    total = 0
+    for (pt1, pt2) in pairwise(ring):
+        total += (pt2[0] - pt1[0]) * (pt2[1] + pt1[1])
+    return total >= 0
+
+def pairwise(iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+

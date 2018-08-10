@@ -1,0 +1,1108 @@
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""merge in schema 1.1 changes
+
+Revision ID: bb487e696764
+Revises: 2ae156c8f46d, 9960bbbe4d92
+Create Date: 2017-09-12 12:44:18.378324
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = 'bb487e696764'
+down_revision = ('2ae156c8f46d', '9960bbbe4d92')
+branch_labels = None
+depends_on = None
+
+from alembic import op
+import sqlalchemy as sa
+
+
+def upgrade(engine_name):
+    globals()["upgrade_%s" % engine_name]()
+
+
+def downgrade(engine_name):
+    globals()["downgrade_%s" % engine_name]()
+
+
+
+
+
+def upgrade_data_broker():
+    pass
+
+
+def downgrade_data_broker():
+    pass
+
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""merge aad1bab92536 and d59c15bea7a6
+
+Revision ID: f9ebccbd6e12
+Revises: aad1bab92536, d59c15bea7a6
+Create Date: 2017-09-04 11:22:36.483214
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = 'f9ebccbd6e12'
+down_revision = ('aad1bab92536', 'd59c15bea7a6')
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    pass
+
+
+def downgrade():
+    pass
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+import collections
+import os
+import signal
+import time
+import socket
+import threadmanager  # should not depend on in project files - move somewhere else
+# from sets import Set
+
+import pygame
+
+import config
+import fonts
+import hw
+import logsupport
+from logsupport import ConsoleError, ConsoleDetail, ConsoleDetailHigh, ConsoleWarning
+import debug
+
+globdoc = {}
+moddoc = {}
+paramlog = []
+exemplarobjs = collections.OrderedDict()
+
+# next several lines stolen from https://stackoverflow.com/questions/39198961/pygame-init-fails-when-run-with-systemd
+# this handles some weird random SIGHUP when initializing pygame, it's really a hack to work around it
+# Not really sure what other ill effects this might have!!!
+def handler(signum, frame):
+	print('Systemd signal hack raised', signum, repr(frame))
+	pass
+try:
+	signal.signal(signal.SIGHUP, handler)
+except AttributeError:
+	# Windows compatibility
+	pass
+# end SIGHUP hack
+
+
+class clsstruct:
+	def __init__(self, nm):
+		self.name = nm
+		self.members = []
+		self.membernms = set()
+
+	def addmem(self, nm):
+		self.membernms.add(nm)
+
+
+clslst = {}
+doclst = {}
+
+
+def register_example(estr, obj):
+	exemplarobjs[estr] = list(dir(obj))
+	mro = list(obj.__class__.__mro__)
+	mro.reverse()
+	for i in range(len(mro)):
+		t = mro[i]
+		if t.__name__ not in clslst:
+			doclst[t.__name__] = t.__doc__
+			clslst[t.__name__] = clsstruct(t.__name__)
+		for e in mro[i + 1:]:
+			clslst[t.__name__].addmem(e.__name__)
+
+
+def scaleW(p):
+	return int(round(float(p)*float(config.dispratioW)))
+
+
+def scaleH(p):
+	return int(round(float(p)*float(config.dispratioH)))
+
+
+def ParseParam(param, parseconfig):
+	global paramlog
+	for p in param.__dict__:
+		if '__' not in p:
+			p2 = p.replace('_', '', 1) if p.startswith('_') else p
+			config.__dict__[p2] = type(param.__dict__[p])(parseconfig.get(p2, param.__dict__[p]))
+			globdoc[p2] = (type(param.__dict__[p]), param.__dict__[p])
+			if not p.startswith('_'):
+				# can't log directly because logger isn't initialized yet at the point this is called
+				paramlog.append('Param: ' + p + ": " + str(config.__dict__[p2]))
+
+
+def LogParams():
+	global paramlog
+	for p in paramlog:
+		logsupport.Logs.Log(p,severity=ConsoleDetail)
+
+def InitializeEnvironment():
+	# this section is an unbelievable nasty hack - for some reason Pygame
+	# needs a keyboardinterrupt to initialise in some limited circs (second time running)
+	# lines below commented with HACK also part of workaround
+	# see https://stackoverflow.com/questions/17035699/pygame-requires-keyboard-interrupt-to-init-display
+	class Alarm(Exception):
+		pass
+
+	def alarm_handler(signum, frame):
+		print('Hack alarm raised',signum,repr(frame))
+		raise Alarm
+
+	# end hack
+	try:
+		with open(config.homedir + "/.Screentype") as f:
+			config.screentype = f.readline().rstrip('\n')
+	except IOError:
+		config.screentype = "*Unknown*"
+
+	hw.initOS(config.screentype)
+	pygame.display.init()
+	config.hostname = socket.gethostname()
+	config.starttime = time.time()
+	config.fonts = fonts.Fonts()
+	config.screenwidth, config.screenheight = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+
+	config.personalsystem = os.path.isfile(config.homedir + "/homesystem")
+
+	if config.screentype in ('pi7','35r','28c'):
+		from touchhandler import Touchscreen, TS_PRESS, TS_RELEASE, TS_MOVE
+		ts = Touchscreen()
+		def touchhandler(event,touch):
+			p = (touch.x,touch.y)
+			if event == TS_PRESS:
+				e = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {'pos': p})
+				debug.debugPrint('Touch','Press: '+str(p))
+				pygame.fastevent.post(e)
+			elif event == TS_RELEASE:
+				e = pygame.event.Event(pygame.MOUSEBUTTONUP, {'pos': p})
+				debug.debugPrint('Touch', 'Release: ' + str(p))
+				pygame.fastevent.post(e)
+			elif event == TS_MOVE:
+				e = pygame.event.Event(pygame.MOUSEMOTION, {'pos': p})
+				debug.debugPrint('Touch', 'Motion: ' + str(p))
+				pygame.fastevent.post(e)
+
+
+		for touchtyp in ts.touches:
+			touchtyp.on_press = touchhandler
+			touchtyp.on_release = touchhandler
+			touchtyp.on_move = touchhandler
+
+		threadmanager.SetUpHelperThread('TouchHandler',ts.run)
+
+	if config.screenwidth > config.screenheight:
+		config.portrait = False
+	try:
+		config.lastup = os.path.getmtime(config.homedir + "/.ConsoleStart")
+		with open(config.homedir + "/.ConsoleStart") as f:
+			laststart = float(f.readline())
+			lastrealstart = float(f.readline())
+		config.previousup = config.lastup - lastrealstart
+		prevsetup = lastrealstart - laststart
+	except (IOError, ValueError):
+		config.previousup = -1
+		config.lastup = -1
+		prevsetup = -1
+
+	with open(config.homedir + "/.RelLog", "a") as f:
+		f.write(
+			str(config.starttime) + ' ' + str(prevsetup) + ' ' + str(config.previousup) + ' ' + str(config.lastup) + ' '
+			+ str(config.starttime - config.lastup) + '\n')
+
+	"""
+	Scale screen constants
+	"""
+	config.dispratioW = float(config.screenwidth)/float(config.basewidth)
+	config.dispratioH = float(config.screenheight)/float(config.baseheight)
+	config.horizborder = scaleW(config.horizborder)
+	config.topborder = scaleH(config.topborder)
+	config.botborder = scaleH(config.botborder)
+	config.cmdvertspace = scaleH(config.cmdvertspace)
+	signal.signal(signal.SIGALRM, alarm_handler)  # HACK
+	signal.alarm(3)  # HACK
+	try:  # HACK
+		config.screen = pygame.display.set_mode((config.screenwidth, config.screenheight),
+												pygame.FULLSCREEN)  # real needed line
+		signal.alarm(0)  # HACK
+	except Alarm:  # HACK
+		raise KeyboardInterrupt  # HACK
+
+	config.screen.fill((0, 0, 0))  # clear screen
+	pygame.display.update()
+	if hw.touchdevice:
+		pygame.mouse.set_visible(False)  # no cursor
+	pygame.fastevent.init()
+
+
+def LocalizeParams(inst, configsection, indent, *args, **kwargs):
+	"""
+	Merge screen specific parameter values into self.<var> entries for the class
+	inst is the class object (self), configsection is the Section of the config.txt file for this object,
+		args are any global parameters (see globalparams.py) for which local overrides make sense and are used
+	after the call there will be self.xxx variables for all relevant paramters
+	kwargs are locally defined parameters for this object and a default value which also gets added as self.xxx and
+		a value is taken from the config section if present
+	:param inst:
+	:param configsection:
+	:param indent:
+	:param args
+	:param kwargs:
+	:return:
+	"""
+	global moddoc
+	if not inst.__class__.__name__ in moddoc:
+		moddoc[inst.__class__.__name__] = {'loc': {}, 'ovrd': set()}
+	if configsection is None:
+		configsection = {}
+	lcllist = []
+	lclval = []
+	for nametoadd in kwargs:
+		if nametoadd not in inst.__dict__:
+			logsupport.Logs.Log('Adding keyword without previous definition(internal anomoly): ', nametoadd)
+			lcllist.append(nametoadd)
+			lclval.append(kwargs[nametoadd])
+			moddoc[inst.__class__.__name__]['loc'][lcllist[-1]] = type(lclval[-1])
+		else:
+			lcllist.append(nametoadd)
+			lclval.append(kwargs[nametoadd])
+			moddoc[inst.__class__.__name__]['loc'][lcllist[-1]] = type(lclval[-1])
+			#logsupport.Logs.Log('Duplicated keyword localization (internal error): ' + nametoadd)
+	for nametoadd in args:
+		if nametoadd in config.__dict__:
+			lcllist.append(nametoadd)
+			lclval.append(config.__dict__[nametoadd])
+			moddoc[inst.__class__.__name__]['ovrd'].add(lcllist[-1])
+		else:
+			logsupport.Logs.Log("Obj " + inst.__class__.__name__ + ' attempted import of non-existent global ' + nametoadd,
+							severity=ConsoleError)
+
+	for i in range(len(lcllist)):
+		if isinstance(lclval[i], bool):
+			val = (configsection.get(lcllist[i], 'True' if lclval[i] else 'False') == 'True')
+		else:
+			val = type(lclval[i])(configsection.get(lcllist[i], lclval[i]))
+		if isinstance(val, list):
+			for j, v in enumerate(val):
+				if isinstance(v, str):
+					try:
+						val[j] = v.decode(encoding='UTF-8')#unicode(v,'UTF-8')
+					except AttributeError:
+						val[j] = v
+		if (lclval[i] != val) and (lcllist[i] in args):
+			logsupport.Logs.Log(indent + 'LParam: ' + lcllist[i] + ': ' + str(val), severity=ConsoleDetailHigh)
+		inst.__dict__[lcllist[i]] = val
+
+
+def LocalizeExtra(inst, configsection, **kwargs):
+	global moddoc
+	if not inst.__class__.__name__ in moddoc:
+		moddoc[inst.__class__.__name__] = {'loc': {}, 'ovrd': set()}
+	if configsection is None:
+		configsection = {}
+	lcllist = []
+	lclval = []
+	for nametoadd in kwargs:
+		if nametoadd not in inst.__dict__:
+			logsupport.Logs.Log('Adding extra keyword without previous definition(internal anomoly): ', nametoadd)
+			lcllist.append(nametoadd)
+			lclval.append(kwargs[nametoadd])
+			moddoc[inst.__class__.__name__]['loc'][lcllist[-1]] = type(lclval[-1])
+		else:
+			lcllist.append(nametoadd)
+			lclval.append(kwargs[nametoadd])
+			moddoc[inst.__class__.__name__]['loc'][lcllist[-1]] = type(lclval[-1])
+	for i in range(len(lcllist)):
+		val = type(lclval[i])(configsection.get(lcllist[i], lclval[i]))
+		if isinstance(val, list):
+			for j, v in enumerate(val):
+				if isinstance(v, str):
+					try:
+						val[j] = v.decode(encoding='UTF-8')#unicode(v,'UTF-8')
+					except AttributeError:
+						val[j] = v
+		inst.__dict__[lcllist[i]] = val
+
+
+def DumpDocumentation():
+	docfile = open('docs/params.txt', 'w')
+	os.chmod('docs/params.txt', 0o555)
+	docfile.write('Global Parameters:\n')
+	for p in sorted(globdoc):
+		docfile.write(
+			'    {:32s}:  {:8s}  {}\n'.format(p, globdoc[p][0].__name__, str(globdoc[p][1])))
+	docfile.write('Module Parameters:\n')
+	for p in sorted(moddoc):
+		docfile.write('    ' + p + '\n')
+		docfile.write('        Local Parameters:\n')
+		for q in sorted(moddoc[p]['loc']):
+			docfile.write('            {:24s}:  {:8s}\n'.format(q, moddoc[p]['loc'][q].__name__))
+		docfile.write('        Overrideable Globals:\n')
+		for q in sorted(moddoc[p]['ovrd']):
+			docfile.write('            ' + q + '\n')
+	docfile.close()
+	docfile = open('docs/classstruct.txt', 'w')
+	docfile.write('Class/Attribute Structure:\n')
+	docfile.write('\n')
+	mdfile = open('docs/classstruct.md', 'w')
+	mdfile.write('# Class/Attribute Structure:\n')
+	mdfile.write('\n')
+
+	varsinuse = {}
+	olditems = []
+	for i, scr in exemplarobjs.items():
+		varsinuse[i] = [x for x in scr if not x.startswith('_') and x not in olditems]
+		olditems += [x for x in scr if not x.startswith('_')]
+
+	def scrublowers(ritem):
+		lower = []
+		rtn = list(ritem.members)
+		for mem in ritem.members:
+			lower += scrublowers(mem)
+		ritem.members = [xitem for xitem in ritem.members if xitem not in lower]
+		return rtn
+
+	def docwrite(ritem, ind, md):
+		docfile.write(ind + ritem.name + ': [' + ', '.join([n2.name for n2 in ritem.members]) + ']\n')
+		mdfile.write('\n' + md + ritem.name + ': [' + ', '.join([n2.name for n2 in ritem.members]) + ']\n')
+		docfile.write(ind + (doclst[ritem.name] if not doclst[ritem.name] is None else "***missing***") + '\n')
+		mdfile.write((doclst[ritem.name] if not doclst[ritem.name] is None else "\n***missing***\n") + '\n')
+		if ritem.name in varsinuse:
+			for v in varsinuse[ritem.name]:
+				docfile.write(ind + '  ' + v + '\n')
+				mdfile.write('*  ' + v + '\n')
+		for mem in ritem.members:
+			docwrite(mem, ind + '    ', '##')
+
+	for c in clslst.values():
+		for n in c.membernms:
+			c.members.append(clslst[n])
+	r = clslst['object']
+	scrublowers(r)
+	docwrite(r, '', '#')
+	docfile.close()
+	mdfile.close()
+
+
+import re
+from datetime import timedelta
+
+
+def get_timedelta(line):
+	if line is None:
+		return 0
+	if line.isdigit():
+		line += ' seconds'
+	timespaces = {"days": 0}
+	for timeunit in "year month week day hour minute second".split():
+		content = re.findall(r"([0-9]*?)\s*?" + timeunit, line)
+		if content:
+			timespaces[timeunit + "s"] = int(content[0])
+	timespaces["days"] += 30*timespaces.pop("months", 0) + 365*timespaces.pop("years", 0)
+	td = timedelta(**timespaces)
+	return td.days*86400 + td.seconds
+
+
+class Enumerate(object):
+	def __init__(self, names):
+		for number, name in enumerate(names.split()):
+			setattr(self, name, name)
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+"""
+***************************************************************************
+    merge.py
+    ---------------------
+    Date                 : October 2014
+    Copyright            : (C) 2014 by Radoslaw Guzinski
+    Email                : rmgu at dhi-gras dot com
+***************************************************************************
+*                                                                         *
+*   This program is free software; you can redistribute it and/or modify  *
+*   it under the terms of the GNU General Public License as published by  *
+*   the Free Software Foundation; either version 2 of the License, or     *
+*   (at your option) any later version.                                   *
+*                                                                         *
+***************************************************************************
+"""
+
+__author__ = 'Radoslaw Guzinski'
+__date__ = 'October 2014'
+__copyright__ = '(C) 2014, Radoslaw Guzinski'
+
+# This will get replaced with a git SHA1 when you do a git archive
+
+__revision__ = '$Format:%H$'
+
+import os
+
+from qgis.PyQt.QtGui import QIcon
+
+from processing.algs.gdal.GdalAlgorithm import GdalAlgorithm
+from processing.core.outputs import OutputRaster
+from processing.core.parameters import ParameterBoolean
+from processing.core.parameters import ParameterMultipleInput
+from processing.core.parameters import ParameterSelection
+from processing.algs.gdal.GdalUtils import GdalUtils
+from processing.tools.system import tempFolder
+from processing.tools import dataobjects
+
+pluginPath = os.path.split(os.path.split(os.path.dirname(__file__))[0])[0]
+
+
+class buildvrt(GdalAlgorithm):
+
+    INPUT = 'INPUT'
+    OUTPUT = 'OUTPUT'
+    RESOLUTION = 'RESOLUTION'
+    SEPARATE = 'SEPARATE'
+    PROJ_DIFFERENCE = 'PROJ_DIFFERENCE'
+
+    RESOLUTION_OPTIONS = ['average', 'highest', 'lowest']
+
+    def getIcon(self):
+        return QIcon(os.path.join(pluginPath, 'images', 'gdaltools', 'vrt.png'))
+
+    def defineCharacteristics(self):
+        self.name, self.i18n_name = self.trAlgorithm('Build Virtual Raster')
+        self.group, self.i18n_group = self.trAlgorithm('Raster miscellaneous')
+        self.addParameter(ParameterMultipleInput(self.INPUT,
+                                                 self.tr('Input layers'), dataobjects.TYPE_RASTER))
+        self.addParameter(ParameterSelection(self.RESOLUTION,
+                                             self.tr('Resolution'), self.RESOLUTION_OPTIONS, 0))
+        self.addParameter(ParameterBoolean(self.SEPARATE,
+                                           self.tr('Layer stack'), True))
+        self.addParameter(ParameterBoolean(self.PROJ_DIFFERENCE,
+                                           self.tr('Allow projection difference'), False))
+        self.addOutput(OutputRaster(buildvrt.OUTPUT, self.tr('Virtual')))
+
+    def getConsoleCommands(self):
+        arguments = []
+        arguments.append('-resolution')
+        arguments.append(self.RESOLUTION_OPTIONS[self.getParameterValue(self.RESOLUTION)])
+        if self.getParameterValue(buildvrt.SEPARATE):
+            arguments.append('-separate')
+        if self.getParameterValue(buildvrt.PROJ_DIFFERENCE):
+            arguments.append('-allow_projection_difference')
+        # Always write input files to a text file in case there are many of them and the
+        # length of the command will be longer then allowed in command prompt
+        listFile = os.path.join(tempFolder(), 'buildvrtInputFiles.txt')
+        with open(listFile, 'w') as f:
+            f.write(self.getParameterValue(buildvrt.INPUT).replace(';', '\n'))
+        arguments.append('-input_file_list')
+        arguments.append(listFile)
+        out = self.getOutputValue(buildvrt.OUTPUT)
+        # Ideally the file extensions should be limited to just .vrt but I'm not sure how
+        # to do it simply so instead a check is performed.
+        _, ext = os.path.splitext(out)
+        if not ext.lower() == '.vrt':
+            out = out.replace(ext, '.vrt')
+            self.setOutputValue(self.OUTPUT, out)
+        arguments.append(out)
+
+        return ['gdalbuildvrt', GdalUtils.escapeAndJoin(arguments)]
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""merge-d1-with-file-gen
+
+Revision ID: 78c33181a0e5
+Revises: 73db7d2cc754, 7d4f322c7661
+Create Date: 2016-09-06 13:36:09.249432
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = '78c33181a0e5'
+down_revision = ('73db7d2cc754', '7d4f322c7661')
+branch_labels = None
+depends_on = None
+
+
+def upgrade(engine_name):
+    globals()["upgrade_%s" % engine_name]()
+
+
+def downgrade(engine_name):
+    globals()["downgrade_%s" % engine_name]()
+
+
+
+
+
+def upgrade_data_broker():
+    pass
+
+
+def downgrade_data_broker():
+    pass
+
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+"""Merge phone, email, and mailing address information.
+
+A Dataflow pipeline that merges phone, email, and address information associated
+with the same names. Each input "database" is a tab-delimited text file pairing
+names with one phone number/email address/mailing address; multiple entries
+associated with the same name are allowed. Outputs are a tab-delimited text file
+with the merged information and another file containing some simple statistics.
+See mergecontacts_test.py for example inputs and outputs.
+
+A demonstration of:
+  CoGroupByKey
+  Non-linear pipelines (i.e., pipelines with branches)
+"""
+
+from __future__ import absolute_import
+
+import argparse
+import logging
+import re
+from builtins import next
+
+import apache_beam as beam
+from apache_beam.io import ReadFromText
+from apache_beam.io import WriteToText
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import SetupOptions
+from apache_beam.testing.util import assert_that
+from apache_beam.testing.util import equal_to
+
+
+def run(argv=None, assert_results=None):
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument(
+      '--input_email',
+      required=True,
+      help='Email database, with each line formatted as "name<TAB>email".')
+  parser.add_argument(
+      '--input_phone',
+      required=True,
+      help='Phonebook, with each line formatted as "name<TAB>phone number".')
+  parser.add_argument(
+      '--input_snailmail',
+      required=True,
+      help='Address database, with each line formatted as "name<TAB>address".')
+  parser.add_argument('--output_tsv',
+                      required=True,
+                      help='Tab-delimited output file.')
+  parser.add_argument('--output_stats',
+                      required=True,
+                      help='Output file for statistics about the input.')
+  known_args, pipeline_args = parser.parse_known_args(argv)
+  # We use the save_main_session option because one or more DoFn's in this
+  # workflow rely on global context (e.g., a module imported at module level).
+  pipeline_options = PipelineOptions(pipeline_args)
+  pipeline_options.view_as(SetupOptions).save_main_session = True
+  with beam.Pipeline(options=pipeline_options) as p:
+
+    # Helper: read a tab-separated key-value mapping from a text file,
+    # escape all quotes/backslashes, and convert it a PCollection of
+    # (key, value) pairs.
+    def read_kv_textfile(label, textfile):
+      return (p
+              | 'Read: %s' % label >> ReadFromText(textfile)
+              | 'Backslash: %s' % label >> beam.Map(
+                  lambda x: re.sub(r'\\', r'\\\\', x))
+              | 'EscapeQuotes: %s' % label >> beam.Map(
+                  lambda x: re.sub(r'"', r'\"', x))
+              | 'Split: %s' % label >> beam.Map(
+                  lambda x: re.split(r'\t+', x, 1)))
+
+    # Read input databases.
+    email = read_kv_textfile('email', known_args.input_email)
+    phone = read_kv_textfile('phone', known_args.input_phone)
+    snailmail = read_kv_textfile('snailmail', known_args.input_snailmail)
+
+    # Group together all entries under the same name.
+    grouped = (email, phone, snailmail) | 'group_by_name' >> beam.CoGroupByKey()
+
+    # Prepare tab-delimited output; something like this:
+    # "name"<TAB>"email_1,email_2"<TAB>"phone"<TAB>"first_snailmail_only"
+    def format_as_tsv(name_email_phone_snailmail):
+      (name, (email, phone, snailmail)) = name_email_phone_snailmail
+      return '\t'.join(
+          ['"%s"' % name,
+           '"%s"' % ','.join(email),
+           '"%s"' % ','.join(phone),
+           '"%s"' % next(iter(snailmail), '')])
+
+    tsv_lines = grouped | beam.Map(format_as_tsv)
+
+    # Compute some stats about our database of people.
+    def without_email(name_email_phone_snailmail):
+      (_, (email, _, _)) = name_email_phone_snailmail
+      return not next(iter(email), None)
+
+    def without_phones(name_email_phone_snailmail):
+      (_, (_, phone, _)) = name_email_phone_snailmail
+      return not next(iter(phone), None)
+
+    def without_address(name_email_phone_snailmail):
+      (_, (_, _, snailmail)) = name_email_phone_snailmail
+      return not next(iter(snailmail), None)
+
+    luddites = grouped | beam.Filter(without_email) # People without email.
+    writers = grouped | beam.Filter(without_phones) # People without phones.
+    nomads = grouped | beam.Filter(without_address) # People without addresses.
+
+    num_luddites = luddites | 'Luddites' >> beam.combiners.Count.Globally()
+    num_writers = writers | 'Writers' >> beam.combiners.Count.Globally()
+    num_nomads = nomads | 'Nomads' >> beam.combiners.Count.Globally()
+
+    # Write tab-delimited output.
+    # pylint: disable=expression-not-assigned
+    tsv_lines | 'WriteTsv' >> WriteToText(known_args.output_tsv)
+
+    # TODO(silviuc): Move the assert_results logic to the unit test.
+    if assert_results is not None:
+      expected_luddites, expected_writers, expected_nomads = assert_results
+      assert_that(num_luddites, equal_to([expected_luddites]),
+                  label='assert:luddites')
+      assert_that(num_writers, equal_to([expected_writers]),
+                  label='assert:writers')
+      assert_that(num_nomads, equal_to([expected_nomads]),
+                  label='assert:nomads')
+
+
+if __name__ == '__main__':
+  logging.getLogger().setLevel(logging.INFO)
+  run()
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+from rx.core import Observable
+from rx.internal import extensionclassmethod
+
+
+@extensionclassmethod(Observable, alias="zip_array")
+def zip_list(cls, *args):
+    """Merge the specified observable sequences into one observable
+    sequence by emitting a list with the elements of the observable
+    sequences at corresponding indexes.
+
+    Keyword arguments:
+    :param Observable cls: Class
+    :param Tuple args: Observable sources.
+
+    :return: Returns an observable sequence containing lists of
+    elements at corresponding indexes.
+    :rtype: Observable
+    """
+
+    def result(*args):
+        return list(args)
+
+    args += (result,)
+    return Observable.zip(*args)
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+"""Merge two Potree OctTrees into a single one."""
+
+import argparse, traceback, time, os, json, numpy
+from pympc import utils
+
+
+def fixHeader(inputFile, outputFile):
+    (_, minX, minY, minZ, maxX, maxY, maxZ, _, _, _, _, _, _) = utils.getPCFileDetails(inputFile)
+    utils.shellExecute('lasinfo -i %s -nc -nv -nco -set_bounding_box %f %f %f %f %f %f' % (outputFile, minX, minY, minZ, maxX, maxY, maxZ))
+
+
+def joinNode(node, nodeAbsPathA, nodeAbsPathB, nodeAbsPathO, hierarchyStepSize, extension, cmcommand):
+    hrcFile = node + '.hrc'
+    hrcA = None
+    if os.path.isfile(nodeAbsPathA + '/' + hrcFile):
+        # Check if there is data in this node in Octtree A (we check if the HRC file for this node exist)
+        hrcA = utils.readHRC(nodeAbsPathA + '/' + hrcFile, hierarchyStepSize)
+        if len(os.listdir(nodeAbsPathA)) == 2:
+            hrcA[0][0] = utils.getPCFileDetails(nodeAbsPathA + '/' + node + extension)[0]
+    hrcB = None
+    if os.path.isfile(nodeAbsPathB + '/' + hrcFile):
+        # Check if there is data in this node in Octtree B (we check if the HRC file for this node exist)
+        hrcB = utils.readHRC(nodeAbsPathB + '/' + hrcFile, hierarchyStepSize)
+        if len(os.listdir(nodeAbsPathB)) == 2:
+            hrcB[0][0] = utils.getPCFileDetails(nodeAbsPathB + '/' + node + extension)[0]
+
+    if hrcA != None and hrcB != None:
+        utils.shellExecute('mkdir -p ' + nodeAbsPathO)
+        # If both Octtrees A and B have data in this node we have to merge them
+        hrcO = utils.initHRC(hierarchyStepSize)
+        for level in range(hierarchyStepSize+2):
+            numChildrenA = len(hrcA[level])
+            numChildrenB = len(hrcB[level])
+            numChildrenO = max((numChildrenA, numChildrenB))
+            if level < (hierarchyStepSize+1):
+                for i in range(numChildrenO):
+                    hasNodeA = (i < numChildrenA) and (hrcA[level][i] > 0)
+                    hasNodeB = (i < numChildrenB) and (hrcB[level][i] > 0)
+                    (childNode, isFile) = utils.getNodeName(level, i, node, hierarchyStepSize, extension)
+                    if hasNodeA and hasNodeB:
+                        hrcO[level].append(hrcA[level][i] + hrcB[level][i])
+                        #merge lAZ or folder (iteratively)
+                        if isFile:
+                            utils.shellExecute('lasmerge -i ' +  nodeAbsPathA + '/' + childNode + ' ' +  nodeAbsPathB + '/' + childNode + ' -o ' + nodeAbsPathO + '/' + childNode)
+                            #We now need to set the header of the output file as the input files (lasmerge will have shrink it and we do not want that
+                            fixHeader(nodeAbsPathA + '/' + childNode, nodeAbsPathO + '/' + childNode)
+                        else:
+                            joinNode(node + childNode, nodeAbsPathA + '/' + childNode, nodeAbsPathB + '/' + childNode, nodeAbsPathO + '/' + childNode, hierarchyStepSize, extension, cmcommand)
+                    elif hasNodeA:
+                        #mv / cp
+                        hrcO[level].append(hrcA[level][i])
+                        utils.shellExecute(cmcommand + nodeAbsPathA + '/' + childNode + ' ' + nodeAbsPathO + '/' + childNode)
+                    elif hasNodeB:
+                        #mv / cp
+                        hrcO[level].append(hrcB[level][i])
+                        utils.shellExecute(cmcommand + nodeAbsPathB + '/' + childNode + ' ' + nodeAbsPathO + '/' + childNode)
+                    else:
+                        hrcO[level].append(0)
+            else:
+                hrcO[level] = list(numpy.array(hrcA[level] + ([0]*(numChildrenO - numChildrenA))) + numpy.array(hrcB[level] + ([0]*(numChildrenO - numChildrenB))))
+        # Write the HRC file
+        utils.writeHRC(nodeAbsPathO + '/' + hrcFile, hierarchyStepSize, hrcO)
+    elif hrcA != None:
+        # Only Octtree A has data in this node. We can directly copy it to the output Octtree
+        utils.shellExecute(cmcommand + nodeAbsPathA + ' ' + nodeAbsPathO)
+    elif hrcB != None:
+        # Only Octtree B has data in this node. We can directly copy it to the output Octtree
+        utils.shellExecute(cmcommand + nodeAbsPathB + ' ' + nodeAbsPathO)
+
+def createCloudJS(cloudJSA, cloudJSB, cloudJSO):
+    result = False # Is the data properly merged
+
+    cloudJSDataA = json.loads(open(cloudJSA, 'r').read())
+    cloudJSDataB = json.loads(open(cloudJSB, 'r').read())
+
+    cloudJSDataO = {}
+    # Compare fields in the input cloud.js's that should be equal
+    # We also write the fields in the output cloud.js
+    for equalField in ["version", "octreeDir", "boundingBox", "pointAttributes", "spacing", "scale", "hierarchyStepSize"]:
+        if cloudJSDataA[equalField] == cloudJSDataB[equalField]:
+             cloudJSDataO[equalField] = cloudJSDataA[equalField]
+        else:
+            raise Exception('Error: Can not join cloud.js. Distinct ' + equalField + '!')
+
+    # For the field "tightBoundingBox" we need to merge them since they can be different
+    tbbA = cloudJSDataA["tightBoundingBox"]
+    tbbB = cloudJSDataB["tightBoundingBox"]
+
+    tbbO = {}
+    tbbO["lx"] = min([tbbA["lx"], tbbB["lx"]])
+    tbbO["ly"] = min([tbbA["ly"], tbbB["ly"]])
+    tbbO["lz"] = min([tbbA["lz"], tbbB["lz"]])
+    tbbO["ux"] = max([tbbA["ux"], tbbB["ux"]])
+    tbbO["uy"] = max([tbbA["uy"], tbbB["uy"]])
+    tbbO["uz"] = max([tbbA["uz"], tbbB["uz"]])
+    cloudJSDataO["tightBoundingBox"] = tbbO
+
+    hierarchyStepSize = cloudJSDataA['hierarchyStepSize']
+
+    cloudJSOFile = open(cloudJSO, 'w')
+    cloudJSOFile.write(json.dumps(cloudJSDataO, indent=4))
+    cloudJSOFile.close()
+
+    return hierarchyStepSize
+
+def run(inputFolderA, inputFolderB, outputFolder, moveFiles):
+    # Check input parameters
+    if (not os.path.isdir(inputFolderA)) or (not os.path.isdir(inputFolderB)):
+        raise Exception('Error: Some of the input folder does not exist!')
+    if os.path.isfile(outputFolder):
+        raise Exception('Error: There is a file with the same name as the output folder. Please, delete it!')
+    elif os.path.isdir(outputFolder) and os.listdir(outputFolder):
+        raise Exception('Error: Output folder exists and it is not empty. Please, delete the data in the output folder!')
+
+    # Make the paths absolute path
+    inputFolderA = os.path.abspath(inputFolderA)
+    inputFolderB = os.path.abspath(inputFolderB)
+    outputFolder = os.path.abspath(outputFolder)
+
+    if moveFiles:
+        cmcommand = 'mv '
+    else:
+        cmcommand = 'cp -r '
+
+    dataA = inputFolderA + '/data'
+    dataB = inputFolderB + '/data'
+    dataO = outputFolder + '/data'
+
+    # Check if the octtrees have actual data (i.e. one folder with the root node)
+    hasNodeA = os.listdir(dataA) == ['r',]
+    hasNodeB = os.listdir(dataB) == ['r',]
+
+    if hasNodeA or hasNodeB:
+        utils.shellExecute('mkdir -p ' + outputFolder)
+        if hasNodeA and hasNodeB:
+            # If both Octrees have data we need to merge them
+            # Create output cloud.js from joining the two input ones
+            cloudJSA = inputFolderA + '/cloud.js'
+            cloudJSB = inputFolderB + '/cloud.js'
+            if not (os.path.isfile(cloudJSA)) or not (os.path.isfile(cloudJSB)):
+                raise Exception('Error: Some cloud.js is missing!')
+            # We also get the hierarchyStepSize
+            hierarchyStepSize = createCloudJS(cloudJSA, cloudJSB, outputFolder + '/cloud.js')
+            listFileRootA =  os.listdir(dataA + '/r')
+            if 'r.las' in listFileRootA:
+                extension = 'las'
+            elif 'r.laz' in listFileRootA:
+                extension = 'laz'
+            else:
+                raise Exception('Error: ' + __file__ + ' only compatible with las/laz format')
+            joinNode('r', dataA + '/r', dataB + '/r', dataO + '/r', hierarchyStepSize, extension, cmcommand)
+        elif hasA:
+            utils.shellExecute(cmcommand + inputFolderA + '/* ' + outputFolder)
+        else:
+            utils.shellExecute(cmcommand + inputFolderB + '/* ' + outputFolder)
+    else:
+        print ('Nothing to merge: both Octtrees are empty!')
+
+def argument_parser():
+    """ Define the arguments and return the parser object"""
+    parser = argparse.ArgumentParser(
+    description="Merge two Potree OctTrees into a single one")
+    parser.add_argument('-a','--inputa',default='',help='Input Potree-OctTree A',type=str, required=True)
+    parser.add_argument('-b','--inputb',default='',help='Input Potree-OctTree B',type=str, required=True)
+    parser.add_argument('-o','--output',default='',help='Output Potree-OctTree',type=str, required=True)
+    parser.add_argument('-m','--move',help='Use mv instead of cp when merging Potree-OctTrees. In this case the input data is partially dropped (but process will be faster due to less required IO) [default False]',default=False,action='store_true')
+    return parser
+
+def main():
+    args = argument_parser().parse_args()
+    print ('Input Potree Octtree A: ', args.inputa)
+    print ('Input Potree Octtree B: ', args.inputb)
+    print ('Output Potree Octtree: ', args.output)
+    print ('Move: ', args.move)
+
+    try:
+        t0 = time.time()
+        print ('Starting ' + os.path.basename(__file__) + '...')
+        run(args.inputa, args.inputb, args.output, args.move)
+        print ('Finished in %.2f seconds' % (time.time() - t0))
+    except:
+        print ('Execution failed!')
+        print (traceback.format_exc())
+
+if __name__ == "__main__":
+    main()
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""merge 2ce6 0fcf
+
+Revision ID: 180c6e439a69
+Revises: 2ce6d5fd51ce, 0fcf578896f3
+Create Date: 2016-11-01 15:39:32.498062
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = '180c6e439a69'
+down_revision = ('2ce6d5fd51ce', '0fcf578896f3')
+branch_labels = None
+depends_on = None
+
+from alembic import op
+import sqlalchemy as sa
+
+
+def upgrade(engine_name):
+    globals()["upgrade_%s" % engine_name]()
+
+
+def downgrade(engine_name):
+    globals()["downgrade_%s" % engine_name]()
+
+
+
+
+
+def upgrade_data_broker():
+    pass
+
+
+def downgrade_data_broker():
+    pass
+
+
+Query: merge two lists
+
+************************** NEXT RESULT **************************************
+"""
+Merge k sorted linked lists and return it as one sorted list. Analyze and describe its complexity.
+"""
+__author__ = 'Danyang'
+import heapq
+# Definition for singly-linked list.
+class ListNode:
+    def __init__(self, x):
+        self.val = x
+        self.next = None
+
+class Solution:
+    def mergeKLists_TLE1(self, lists):
+        """
+        k lists; each list has N items
+        Algorithm 1:
+        Merge the lists 1 by 1, just add a loop outside the merge.
+        Complexity: 2N+3N+4N+..kN = O(k^2 * N)
+
+        Algorithm 2:
+        Group the lists in pairs with every pair having 2 lists, merge two, then repeat again
+        Complexity:
+        T(N) = (k/2)*2N+(k/4)*4N..+(k/2^r)*2^r*N
+        T(N) = O(lg k * k * N)
+
+        :param lists: a list of ListNode
+        :return: ListNode
+        """
+        lists = filter(lambda x: x is not None, lists)
+        if not lists:
+            return
+
+        length = len(lists)
+        factor = 2
+        while length>0:
+            i = 0
+            while True:
+                try:
+                    lists[i] = self.mergeTwoLists(lists[i], lists[i+factor/2])
+                except IndexError:
+                    break
+                i += factor
+
+            length /= 2
+            factor *= 2
+
+        return lists[0]
+
+    def mergeKLists_TLE2(self, lists):
+        """
+
+        :param lists: a list of ListNode
+        :return: ListNode
+        """
+        lists = filter(lambda x: x is not None, lists)
+        if not lists:
+            return
+
+        result = lists[0]
+        for i in xrange(1, len(lists)):
+            result = self.mergeTwoLists(result, lists[i])
+        return result
+
+
+
+    def mergeTwoLists(self, l1, l2):
+        """
+        Linked List
+        assuming ascending order
+        :param l1: ListNode
+        :param l2: ListNode
+        :return:
+        """
+        dummy = ListNode(0)
+        dummy.next = l1
+
+        pre = dummy
+        the_other = l2
+        while pre and pre.next:
+            cur = pre.next
+            if the_other and cur.val>the_other.val:
+                # insert
+                temp = the_other.next
+                pre.next, the_other.next = the_other, cur
+
+                the_other = temp  # advance the_other
+            pre = pre.next
+
+
+        # dangling list
+        if the_other:
+            pre.next = the_other  # appending
+
+        return dummy.next
+
+    def mergeKLists(self, lists):
+        """
+        use heap
+        heap pointer
+
+        -------------------
+         |  |  |  |  |  |
+         |  |  |  |  |  |
+         |  |  |  |  |  |
+         |  |  |  |  |  |
+
+        reference: https://github.com/leetcoders/Leetcode-Py/blob/master/Merge%20k%20Sorted%20Lists.py
+        :param lists:
+        :return:
+        """
+        heap = []
+        for head_node in lists:
+            if head_node:
+                heapq.heappush(heap, (head_node.val, head_node))
+
+        dummy = ListNode(0)
+
+        cur = dummy
+        while heap:
+            smallest_node = heapq.heappop(heap)[1]
+            cur.next = smallest_node
+            cur = cur.next
+            if smallest_node.next:
+                heapq.heappush(heap, (smallest_node.next.val, smallest_node.next))
+        return dummy.next
+
+if __name__=="__main__":
+    assert  Solution().mergeKLists([None, None])==None
+    assert Solution().mergeKLists([ListNode(1), ListNode(0)]).val==0
+

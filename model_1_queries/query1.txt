@@ -1,0 +1,1256 @@
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+##############################################################################################
+# Copyright 2014-2015 Cloud Media Sdn. Bhd.
+#
+# This file is part of Xuan Application Development SDK.
+#
+# Xuan Application Development SDK is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Xuan Application Development SDK is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Xuan Application Development SDK.  If not, see <http://www.gnu.org/licenses/>.
+##############################################################################################
+
+
+from com.cloudMedia.theKuroBox.sdk.app.appinfo import AppInfo
+
+class SqliteDataAccess():
+    
+    SQL3COL_NULL = "NULL"
+    SQL3COL_INTEGER = "INTEGER"
+    SQL3COL_REAL = "REAL"
+    SQL3COL_TEXT = "TEXT"
+    SQL3COL_BLOB = "BLOB"
+    
+    def __init__(self):
+        pass
+
+    def create_table(self, table, columns):
+        '''
+        Function : Create a table.
+        @param table:String                  - The name of the table
+        @param colums:List<String>           - The list of columns properties.
+        
+        @note: The SQL query formed will be: CREATE TABLE $table ($columns[0], $columns[1], $columns[2], ... $columns[n])
+        
+        @return A dictionary with the following structure
+        { "returnValue":100, "returnMessage":success }
+        
+        '''
+        pass
+
+    def drop_table(self, table):
+        
+        '''
+        Function : Remove a table
+        @param table:String                   - The name of the table
+        
+        @return A dictionary with the following structure
+        { "returnValue":100, "returnMessage":success }
+        '''
+        pass
+
+    def select(self, table, fields=["*"], keyValues={}, order=[], asc=True, limit=50, offset=0, groupBy=[]):
+        '''
+        Function : Select a list of data
+        @param table:String                  - The name of the table
+        @param fields:List<String>           - A list of columns to be selected
+        @param keyValues:Dictionary          - A dictionary containing the select conditions
+        @param order:List<String>            - A list of columns to be ordered
+        @param asc:Boolean                   - Whether to sort it in ascending. False to sort in descending
+        @param limit:Number                  - The total number of data to be returned
+        @param offset:Number                 - The starting index to return the data
+        @param groupBy:List<String>          - A list of Group By clause
+        
+        @return A list of data
+        '''
+        pass
+
+    def insert(self, table, keyValues):
+        '''
+        Function : Insert a data into the table
+        @param table:String                    - The name of the table
+        @param keyValues:Dictionary            - A dictionary for column data to be inserted
+        
+        @return: A dictionary of the following structure
+        1. data:Dictionary                     - A dictionary with the following attributes
+                                                       a. lastRowId         - The Last Row ID after insert
+        '''
+        pass
+
+    def update(self, table, setValues, condValues={}):
+        '''
+        Function : Update the data in a table
+        @param table:String                    - The name of the table
+        @param setValues:Dictionary            - A dictionary containing the value to be set
+        @param condValues:Dictionary           - A dictionary containing the condition for the update
+        
+        @return: A dictionary with the following structure
+        { "returnValue":100, "returnMessage":success }
+        '''
+        pass
+
+    def delete(self, table, keyValues={}):
+        '''
+        Function : Remove data from tables
+        @param table:String                        - The name of the table
+        @param keyValues:Dictionary                - A dictionary containing the condition for removal
+        
+        @return: A tuple containing the following
+        [0] The row count deleted
+        [1] The cursor object  
+        '''
+        pass
+
+    def close_conn(self):
+        '''
+        Function : Close the connection
+        '''
+        pass
+
+    def execute(self, sql, keyValues={}):
+        '''
+        Function : Execute a SQL query
+        @param sql:String                          - The SQL query
+        @param keyValues:Dictionary / Tuple        - The parameters to be replaced into the query
+        
+        @note: For further detail, please refer to https://docs.python.org/3.3/library/sqlite3.html#sqlite3.Cursor.execute
+        
+        @return: The cursor object after execution
+        '''
+        pass
+
+    def executescript(self, sqlscript):
+        '''
+        Function : Execute a SQL script
+        @param sqlscript:String                    - The SQL script
+        
+        @return: The result of the execution
+        '''
+        pass
+
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+"""Function for interpolating formatted errors from the TensorFlow runtime.
+
+Exposes the function `interpolate` to interpolate messages with tags of the form
+^^type:name:format^^.
+"""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import collections
+import itertools
+import re
+import string
+
+import six
+
+_NAME_REGEX = r"[A-Za-z0-9.][A-Za-z0-9_.\-/]*?"
+_FORMAT_REGEX = r"[A-Za-z0-9_.\-/${}:]+"
+_TAG_REGEX = r"\^\^({name}):({name}):({fmt})\^\^".format(
+    name=_NAME_REGEX, fmt=_FORMAT_REGEX)
+_INTERPOLATION_REGEX = r"^(.*?)({tag})".format(tag=_TAG_REGEX)
+_INTERPOLATION_PATTERN = re.compile(_INTERPOLATION_REGEX)
+
+_ParseTag = collections.namedtuple("_ParseTag", ["type", "name", "format"])
+
+
+def _parse_message(message):
+  """Parses the message.
+
+  Splits the message into separators and tags. Tags are named tuples
+  representing the string ^^type:name:format^^ and they are separated by
+  separators. For example, in
+  "123^^node:Foo:${file}^^456^^node:Bar:${line}^^789", there are two tags and
+  three separators. The separators are the numeric characters.
+
+  Args:
+    message: String to parse
+
+  Returns:
+    (list of separator strings, list of _ParseTags).
+
+    For example, if message is "123^^node:Foo:${file}^^456" then this function
+    returns (["123", "456"], [_ParseTag("node", "Foo", "${file}")])
+  """
+  seps = []
+  tags = []
+  pos = 0
+  while pos < len(message):
+    match = re.match(_INTERPOLATION_PATTERN, message[pos:])
+    if match:
+      seps.append(match.group(1))
+      tags.append(_ParseTag(match.group(3), match.group(4), match.group(5)))
+      pos += match.end()
+    else:
+      break
+  seps.append(message[pos:])
+  return seps, tags
+
+
+# TODO(jtkeeling): Modify to actually interpolate format strings rather than
+# echoing them.
+def interpolate(error_message):
+  """Interpolates an error message.
+
+  The error message can contain tags of the form ^^type:name:format^^ which will
+  be replaced.
+
+  Args:
+    error_message: A string to interpolate.
+
+  Returns:
+    The string with tags of the form ^^type:name:format^^ interpolated.
+  """
+  seps, tags = _parse_message(error_message)
+  subs = [string.Template(tag.format).safe_substitute({}) for tag in tags]
+  return "".join(
+      itertools.chain(*six.moves.zip_longest(seps, subs, fillvalue="")))
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+#
+# Copyright (c) 2008--2017 Red Hat, Inc.
+#
+# This software is licensed to you under the GNU General Public License,
+# version 2 (GPLv2). There is NO WARRANTY for this software, express or
+# implied, including the implied warranties of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. You should have received a copy of GPLv2
+# along with this software; if not, see
+# http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
+#
+# Red Hat trademarks are not licensed under GPLv2. No permission is
+# granted to use or replicate Red Hat trademarks that are incorporated
+# in this software or its documentation.
+#
+
+import os
+import re
+import time
+from datetime import tzinfo, timedelta
+try:
+    #  python 2
+    import urlparse
+except ImportError:
+    #  python3
+    import urllib.parse as urlparse # pylint: disable=F0401,E0611
+
+from spacewalk.common import usix
+
+
+def setHeaderValue(mp_table, name, values):
+    """
+    Function that correctly sets headers in an Apache-like table
+    The values may be a string (which are set as for a dictionary),
+    or an array.
+    """
+    # mp_table is an Apache mp_table (like headers_in or headers_out)
+    # Sets the header name to the values
+    if isinstance(values, (usix.ListType, usix.TupleType)):
+        for v in values:
+            mp_table.add(name, str(v))
+    else:
+        mp_table[name] = str(values)
+
+
+rfc822_days = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
+rfc822_mons = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def rfc822time(arg):
+    """
+    Return time as a string formatted such as: 'Wed, 23 Jun 2001 23:08:35 GMT'.
+    We must not use locale-specific functions such as strftime here because
+    the RFC explicitly requires C-locale only formatting.  To satisfy this
+    requirement, we declare our own days and months here and do the formatting
+    manually.
+
+    This function accepts a single argument.  If it is a List or Tuple type,
+    it is assumed to be of the form struct_time, as specified in the Python
+    time module reference.  If the argument is a float, it is expected to be
+    the number of seconds from the epoch.
+
+    NOTE:  In all cases, the argument is assumed to be in local time.  It will
+           be translated to GMT in the return value.
+    """
+
+    if isinstance(arg, (usix.ListType, usix.TupleType)):
+        # Convert to float.
+        arg = time.mktime(arg)
+
+    # Now, the arg must be a float.
+
+    (tm_year, tm_mon, tm_mday, tm_hour, tm_min,
+     tm_sec, tm_wday, _tm_yday_, _tm_isdst_) = time.gmtime(arg)
+
+    return \
+        "%s, %02d %s %04d %02d:%02d:%02d %s" % \
+        (rfc822_days[tm_wday], tm_mday, rfc822_mons[tm_mon - 1], tm_year,
+         tm_hour, tm_min, tm_sec, "GMT")
+
+
+def timestamp(s):
+    """
+    Converts the string in format YYYYMMDDHHMISS to seconds from the epoch
+    """
+    if isinstance(s, (usix.IntType, usix.FloatType)):
+        # Presumably already a timestamp
+        return s
+    if len(s) == 14:
+        format_string = "%Y%m%d%H%M%S"
+    elif len(s) == 19:
+        format_string = "%Y-%m-%d %H:%M:%S"
+    else:
+        raise TypeError("String '%s' is not a YYYYMMDDHHMISS" % s)
+    # Get the current DST setting
+    timeval = list(time.strptime(s, format_string))
+    # No daylight information available
+    timeval[8] = -1
+    return time.mktime(timeval)
+
+
+def checkValue(val, *args):
+    """ A type/value checker
+        Check value against the list of acceptable values / types
+    """
+
+    for a in args:
+        if isinstance(a, usix.TypeType):
+            # Is val of type a?
+            if isinstance(val, a):
+                return 1
+        else:
+            # This is an actual value we allow
+            if val == a:
+                return 1
+    return 0
+
+
+def parseUrl(url):
+    """ urlparse is more complicated than what we need.
+
+        We make the assumption that the URL has real URL information.
+        NOTE: http/https ONLY for right now.
+
+        The normal behavior of urlparse:
+            - if no {http[s],file}:// then the string is considered everything
+              that normally follows the URL, e.g. /XMLRPC
+            - if {http[s],file}:// exists, anything between that and the next /
+              is the URL.
+
+        The behavior of *this* function:
+            - if no {http[s],file}:// then the string is simply assumed to be a
+              URL without the {http[s],file}:// attached. The parsed info is
+              reparsed as one would think it would be:
+
+            - returns: (addressing scheme, network location, path,
+                        parameters, query, fragment identifier).
+
+              NOTE: netloc (or network location) can be HOSTNAME:PORT
+    """
+    schemes = ('http', 'https')
+    if url is None:
+        return None
+    parsed = list(urlparse.urlparse(url))
+    if not parsed[0] or parsed[0] not in schemes:
+        url = 'https://' + url
+        parsed = list(urlparse.urlparse(url))
+        parsed[0] = ''
+    return tuple(parsed)
+
+
+def hash_object_id(object_id, factor):
+    """Given an object id (assumed to be <label>-<number>), returns the
+    last few digits for the number. For instance, (812345, 3) should
+    return 345"""
+    # Grab the digits after -
+    num_id = object_id.split('-')[-1]
+    # get last 'factor' numbers
+    num_id = num_id[-factor:]
+    return num_id.rjust(factor, '0')
+
+
+# reg exp for splitting rpm package names.
+re_rpmName = re.compile("^(.*)-([^-]*)-([^-]*)$")
+
+
+def parseRPMName(pkgName):
+    """ IN:  Package string in, n-n-n-v.v.v-r.r_r, format.
+        OUT: Four strings (in a tuple): name, epoch, version, release.
+    """
+    reg = re_rpmName.match(pkgName)
+    if reg is None:
+        return None, None, None, None
+    n, v, r = reg.group(1, 2, 3)
+    e = None
+    ind = r.find(':')
+    if ind >= 0:  # epoch found
+        e = r[ind + 1:]
+        r = r[0:ind]
+    return str(n), e, str(v), str(r)
+
+
+def parseDEBName(pkgName):
+    """ IN:  Package string in, n-n_v.v-v.v-r.r, format.
+        OUT: Four strings (in a tuple): name, epoch, version, release.
+    """
+    if pkgName.find('_') == -1:
+        return None, None, None, None
+    e = None
+    n, version = pkgName.split('_')
+    if version.find(':') != -1:
+        e, version = version.split(':')
+    version_tmpArr = version.split('-')
+    v = '-'.join(version_tmpArr[:-1])
+    r = version_tmpArr[-1]
+    return str(n), e, str(v), str(r)
+
+
+def isSUSE():
+    """Return true if this is a SUSE system, otherwise false"""
+
+    if not os.path.exists('/etc/os-release'):
+        return False
+
+    cpe_name = ''
+    try:
+        lines = open('/etc/os-release', 'rb').readlines()
+        for line in lines:
+            # Skip empty and comment-only lines
+            if re.match(r'[ \t]*(#|$)', line):
+                continue
+
+            # now split it into keys and values. We allow for max one
+            # split/cut (the first one)
+            (key, val) = [c.strip() for c in line.split('=', 1)]
+            if key == 'CPE_NAME':
+                cpe_name = val
+                break
+    except (IOError, OSError):
+        pass
+
+    if 'cpe:/o:opensuse:' in cpe_name or 'cpe:/o:suse:' in cpe_name:
+        return True
+    return False
+
+
+class UTC(tzinfo):
+    """Used for creating offset-aware datetime objects in Python 2."""
+    # pylint: disable=W0613
+
+    def utcoffset(self, dt):
+        return timedelta(0)
+
+    def tzname(self, dt):
+        return "UTC"
+
+    def dst(self, dt):
+        return timedelta(0)
+
+utc = UTC()
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+#
+# @BEGIN LICENSE
+#
+# Psi4: an open-source quantum chemistry software package
+#
+# Copyright (c) 2007-2018 The Psi4 Developers.
+#
+# The copyrights for code used from other parties are included in
+# the corresponding files.
+#
+# This file is part of Psi4.
+#
+# Psi4 is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, version 3.
+#
+# Psi4 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License along
+# with Psi4; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# @END LICENSE
+#
+
+import os
+import sys
+
+from psi4 import core
+from psi4.driver.util.filesystem import *
+from psi4.driver.util import tty
+
+
+def sanitize_name(name):
+    """Function to return *name* in coded form, stripped of
+    characters that confuse filenames, characters into lowercase,
+    ``+`` into ``p``, ``*`` into ``s``, and ``(``, ``)``, ``-``,
+    & ``,`` into ``_``.
+
+    Also checks the sanitized name against a list of restricted C++ keywords.
+    """
+    if name[0].isalpha():
+        temp = name.lower()
+        temp = temp.replace('+', 'p')
+        temp = temp.replace('*', 's')
+        temp = temp.replace('(', '_')
+        temp = temp.replace(')', '_')
+        temp = temp.replace(',', '_')
+        temp = temp.replace('-', '_')
+
+        # Taken from http://en.cppreference.com/w/cpp/keyword
+        cpp_keywords = [
+            "alignas", "alignof", "and", "and_eq", "asm", "atomic_cancel",
+            "atomic_commit", "atomic_noexcept", "auto", "bitand", "bitor",
+            "bool", "break", "case", "catch", "char", "char16_t", "char32_t",
+            "class", "compl", "concept", "const", "constexpr", "const_cast",
+            "continue", "decltype", "default", "delete", "do", "double",
+            "dynamic_cast", "else", "enum", "explicit", "export", "extern",
+            "false", "float", "for", "friend", "goto", "if", "import", "inline",
+            "int", "long", "module", "mutable", "namespace", "new", "noexcept",
+            "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private",
+            "protected", "public", "register", "reinterpret_cast", "requires",
+            "return", "short", "signed", "sizeof", "static", "static_assert",
+            "static_cast", "struct", "switch", "synchronized", "template",
+            "this", "thread_local", "throw", "true", "try", "typedef", "typeid",
+            "typename", "union", "unsigned", "using", "virtual", "void",
+            "volatile", "wchar_t", "while", "xor", "xor_eq",
+
+            # Identifiers with special meanings"
+            "override", "final", "transaction_safe", "transaction_safe_dynamic",
+
+            # Preprocessor tokens
+            "if", "elif", "else", "endif", "defined", "ifdef", "ifndef",
+            "define", "undef", "include", "line", "error", "pragma",
+            "_pragma"
+        ]
+
+        if temp in cpp_keywords:
+            tty.die("The plugin name you provided is a C++ reserved keyword.  Please provide a different name.")
+
+        return temp
+    else:
+        tty.die("Plugin name must begin with a letter.")
+
+
+# Determine the available plugins
+available_plugins = []
+psidatadir = core.get_datadir()
+plugin_path = join_path(psidatadir, "plugin")
+for dir in os.listdir(plugin_path):
+    if os.path.isdir(join_path(plugin_path, dir)):
+        available_plugins.append(dir)
+
+
+def create_plugin(name, template):
+    """Generate plugin in directory with sanitized *name* based upon *template*."""
+
+    name = sanitize_name(name)
+    template_path = join_path(plugin_path, template)
+
+    # Create, but do not overwrite, plugin directory
+    if os.path.exists(name):
+        tty.error("""Plugin directory "{}" already exists.""".format(name))
+
+    # Do a first pass to determine the template temp_files
+    template_files = os.listdir(template_path)
+    source_files = []
+    for temp_file in template_files:
+        target_file = temp_file
+
+        if temp_file.endswith('.template'):
+            target_file = temp_file[0:-9]
+
+        if temp_file.endswith('.cc.template'):
+            source_files.append(target_file)
+
+    tty.hline("""Creating "{}" with "{}" template.""".format(name, template))
+
+    os.mkdir(name)
+    created_files = []
+    for source_file in template_files:
+
+        # Skip swp files
+        if source_file.endswith(".swp"):
+            continue
+
+        target_file = source_file
+
+        if source_file.endswith('.template'):
+            target_file = source_file[0:-9]
+
+        try:
+            print(join_path(template_path, source_file))
+            with open(join_path(template_path, source_file), 'r') as temp_file:
+                contents = temp_file.read()
+        except IOError as err:
+            tty.error("""Unable to open {} template.""".format(source_file))
+            tty.error(err)
+            sys.exit(1)
+
+        contents = contents.replace('@plugin@', name)
+        contents = contents.replace('@Plugin@', name.capitalize())
+        contents = contents.replace('@PLUGIN@', name.upper())
+        contents = contents.replace('@sources@', ' '.join(source_files))
+
+        try:
+            with open(join_path(name, target_file), 'w') as temp_file:
+                temp_file.write(contents)
+                created_files.append(target_file)
+        except IOError as err:
+            tty.error("""Unable to create {}""".format(target_file))
+            tty.error(err)
+            sys.exit(1)
+
+    tty.info("Created plugin files (in {} as {}): ".format(name, template), ", ".join(created_files))
+
+    sys.exit(0)
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image,Table,PageBreak, Flowable
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.pagesizes import letter
+import matplotlib.gridspec as gridspec
+from pdfrw import PdfReader, PdfDict
+from pdfrw.buildxobj import pagexobj
+from pdfrw.toreportlab import makerl
+from reportlab.lib.units import inch
+import matplotlib.pyplot as plt
+from pdfrw import PdfReader
+import sklearn.cluster
+import neurodesign
+import numpy as np
+import matplotlib
+import cStringIO
+import seaborn
+import time
+import sys
+import os
+
+plt.switch_backend('agg')
+
+def make_report(POP,outfile="NeuroDesign.pdf"):
+    '''
+    Function to create a report of a finished design optimisation.
+    '''
+    if not type(POP.cov)==np.ndarray:
+        POP.evaluate()
+
+    styles=getSampleStyleSheet()
+
+    doc = SimpleDocTemplate(outfile,pagesize=letter,
+                            rightMargin=40,leftMargin=40,
+                            topMargin=40,bottomMargin=18)
+
+    Story=[]
+    curpath = os.path.dirname(unicode(__file__, encoding = sys.getfilesystemencoding()))
+
+    logofile = os.path.join(curpath,"media/NeuroDes.png")
+    im = Image(logofile, 1*inch, 1.25*inch)
+    Story.append(im)
+    Story.append(Spacer(1, 12))
+
+    title='NeuroDesign: optimalisation report'
+    Story.append(Paragraph(title,styles['title']))
+    Story.append(Spacer(1, 12))
+
+    formatted_time = time.ctime()
+    ptext = 'Document created: %s' % formatted_time
+    Story.append(Paragraph(ptext, styles["Normal"]))
+    Story.append(Spacer(1, 12))
+
+    Story.append(Paragraph("Correlation between designs", styles["Heading2"]))
+    Story.append(Spacer(1, 12))
+
+    corr='During the optimisation, the designs are mixed with each other to find better combinations.  As such, the designs can look very similar. Actually, the genetic algorithm uses natural selection as a basis, and as such, the designs can be clustered in families.  This is the covariance matrix between the final {0} designs'.format(POP.G)
+    Story.append(Paragraph(corr, styles["Normal"]))
+
+    fig = plt.figure(figsize=(6, 6))
+    plt.imshow(POP.cov,interpolation="nearest")
+    plt.colorbar()
+    imgdata = cStringIO.StringIO()
+    fig.savefig(imgdata, format='pdf')
+    imgdata.seek(0)  # rewind the data
+
+    reader = form_xo_reader
+    image = reader(imgdata)
+    img = PdfImage(image,width=300,height=250)
+    Story.append(img)
+
+    Story.append(PageBreak())
+
+    Story.append(Paragraph("Selected designs", styles["Heading2"]))
+    Story.append(Spacer(1, 12))
+
+    designs='The following figure shows in the upper panel the optimisation score over the different generations.  Below are the expected signals of the best designs from different families, more specific and in relation with the covariance matrix, designs {0}.  Next to each design is the covariance matrix between the regressors, and the diagonalmatrix with the eigenvalues of the design matrix.'.format(str(POP.out)[1:-1])
+    Story.append(Paragraph(designs, styles["Normal"]))
+
+    fig = plt.figure(figsize=(12, 18))
+    gs = gridspec.GridSpec(POP.outdes+4,5)
+    plt.subplot(gs[:2,:])
+    plt.plot(POP.optima)
+
+    for des in range(POP.outdes):
+        design = POP.designs[POP.out[des]]
+        stdes = des+2
+        plt.subplot(gs[stdes,:3])
+        plt.plot(design.Xconv,lw=2)
+        plt.axis('off')
+        plt.subplot(gs[stdes,3])
+        varcov = np.corrcoef(design.Xconv.T)
+        plt.imshow(varcov,interpolation='nearest',clim=(-1,1),cmap="RdBu")
+        plt.axis('off')
+        plt.colorbar(ticks=[-1,0,1])
+        plt.subplot(gs[stdes,4])
+        eigenv = np.diag(np.linalg.svd(design.Xconv.T)[1])
+        plt.imshow(eigenv,interpolation='nearest',clim=(0,1))
+        plt.axis('off')
+        plt.colorbar(ticks=[0,1])
+
+    imgdata = cStringIO.StringIO()
+    fig.savefig(imgdata, format='pdf')
+    imgdata.seek(0)  # rewind the data
+
+    reader = form_xo_reader
+    image = reader(imgdata)
+    img = PdfImage(image,width=500,height=600)
+    Story.append(img)
+
+    Story.append(PageBreak())
+
+    intro='Experimental settings'
+    Story.append(Paragraph(intro, styles["Heading2"]))
+    Story.append(Spacer(1, 12))
+
+    exp = [
+        ["Repetition time (TR):",POP.exp.TR],
+        ["Number of trials:",POP.exp.n_trials],
+        ["Number of scans:",POP.exp.n_scans],
+        ["Number of different stimuli:",POP.exp.n_stimuli],
+        [],
+        ["Stimulus probabilities:",Table([POP.exp.P],rowHeights=13)],
+        [],
+        ["Duration of stimulus (s)",POP.exp.stim_duration],
+        ["Seconds before stimulus (in trial):",POP.exp.t_pre],
+        ["Seconds after stimulus (in trial)",POP.exp.t_post],
+        ["Duration of trial (s):",POP.exp.trial_duration],
+        ["Total experiment duration(s):",POP.exp.duration],
+        [],
+        ["Number of stimuli between rest blocks",POP.exp.restnum],
+        ["Duration of rest blocks (s):",POP.exp.restdur],
+        [],
+        [],
+        [],
+        [],
+        [],
+        ["Contrasts:",Table(list(POP.exp.C),rowHeights=13)],
+        [],
+        ["ITI model:",POP.exp.ITImodel],
+        ["minimum ITI:",POP.exp.ITImin],
+        ["mean ITI:",POP.exp.ITImean],
+        ["maximum ITI:",POP.exp.ITImax],
+        [],
+        ["Hard probabilities: ",POP.exp.hardprob],
+        ["Maximum number of repeated stimuli:",POP.exp.maxrep],
+        ["Resolution of design:",POP.exp.resolution],
+        [],
+        ["Assumed autocorrelation:",POP.exp.rho]
+    ]
+
+    Story.append(Table(exp,rowHeights=13))
+
+    optset='Optimalisation settings'
+    Story.append(Paragraph(optset, styles["Heading2"]))
+    Story.append(Spacer(1, 12))
+
+    opt = [
+        ["Optimalisation weights (Fe,Fd,Fc,Ff):",Table([POP.weights],rowHeights=13)],
+        [],
+        ["Aoptimality?",POP.Aoptimality],
+        ["Number of designs in each generation:",POP.G],
+        ["Number of immigrants in each generation:",POP.I],
+        ["Confounding order:",POP.exp.confoundorder],
+        ["Convergence criterion:",POP.convergence],
+        ["Number of precycles:",POP.preruncycles],
+        ["Number of cycles:",POP.cycles],
+        ["Percentage of mutations:",POP.q],
+        ["Seed:",POP.seed]
+    ]
+
+    Story.append(Table(opt,rowHeights=13))
+
+    doc.build(Story)
+
+def form_xo_reader(imgdata):
+    page, = PdfReader(imgdata).pages
+    return pagexobj(page)
+
+class PdfImage(Flowable):
+    def __init__(self, img_data, width=200, height=200):
+        self.img_width = width
+        self.img_height = height
+        self.img_data = img_data
+
+    def wrap(self, width, height):
+        return self.img_width, self.img_height
+
+    def drawOn(self, canv, x, y, _sW=0):
+        if _sW > 0 and hasattr(self, 'hAlign'):
+            a = self.hAlign
+            if a in ('CENTER', 'CENTRE', TA_CENTER):
+                x += 0.5*_sW
+            elif a in ('RIGHT', TA_RIGHT):
+                x += _sW
+            elif a not in ('LEFT', TA_LEFT):
+                raise ValueError("Bad hAlign value " + str(a))
+        canv.saveState()
+        img = self.img_data
+        if isinstance(img, PdfDict):
+            xscale = self.img_width / img.BBox[2]
+            yscale = self.img_height / img.BBox[3]
+            canv.translate(x, y)
+            canv.scale(xscale, yscale)
+            canv.doForm(makerl(canv, img))
+        else:
+            canv.drawImage(img, x, y, self.img_width, self.img_height)
+        canv.restoreState()
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+import pandas as pd
+import matplotlib
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_imgs(cas_table, class_list=range(10), images_per_class=2, figsize=(20,20), query_condition=None, font_size=12):
+    """Function for plotting image data from a CASTable object"""
+    
+    class_description = {'class0':'T-shirt/top', 'class1':'Trouser', 'class2':'Pullover', 'class3':'Dress', 'class4':'Coat',
+                     'class5':'Sandal', 'class6':'Shirt', 'class7':'Sneaker', 'class8':'Bag', 'class9':'Ankle boot'}
+    
+    img_list=[]
+    lbl_list=[]
+    prd_list=[]
+    arr_list=[]
+    
+    if len(class_list) < images_per_class:
+        fig, axes = plt.subplots(nrows=len(class_list), ncols=images_per_class, figsize=figsize)
+        
+    else:
+        fig, axes = plt.subplots(nrows=images_per_class, ncols=len(class_list), figsize=figsize)
+
+    for i in class_list:
+        a = cas_table.groupby(['_label_']).get_group(['class'+str(i)]).query(query_condition)
+        b = a.sample(images_per_class).fetch(to=images_per_class)
+        lbl_list.append((b['Fetch']['_label_']))
+        img_list.append((b['Fetch']['_image_']))
+
+        if query_condition != None:
+            prd_list.append((b['Fetch']['_DL_PredName_']))
+    
+    
+    img_df=pd.concat(img_list)
+    lbl_df=pd.concat(lbl_list)
+    
+    if query_condition != None:
+        prd_df=pd.concat(prd_list)
+    
+
+    for j in img_df:
+        c=np.fromstring(j,np.uint8)
+        c=c.reshape((28,28))
+        arr_list.append(c)
+    
+    for x,ax in enumerate(axes.flat):
+        ax.imshow(arr_list[x],cmap='gray')
+        ax.set_title('True label: {}'.format(class_description[lbl_df.iloc[x]]))
+        ax.title.set_fontsize(font_size)
+        ax.xaxis.label.set_fontsize(font_size)
+
+        if query_condition != None:
+            ax.set_xlabel('Pred label: {}'.format(class_description[prd_df.iloc[x]]))
+            
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+import random
+# coding: utf-8
+import math
+
+def randomrange(*args):
+
+    """
+    .. function:: randomrange(start, end, step) -> int
+
+    Returns a random number in the defined range
+
+    Examples:
+
+    >>> sql("select randomrange(0, 68, 1)") # doctest: +ELLIPSIS
+    randomrange(0, 68, 1)
+    ---------------------
+    ...
+
+    """
+
+    try:
+        ret=random.randrange(args[0],args[1],args[2])
+    except ValueError:
+        return None
+
+    return ret
+
+randomrange.registered=True
+
+def gaussdistribution(*args):
+
+    """
+    .. function:: gaussdistribution(mean, sigma) -> float
+
+    Returns a gaussian distribution. Sigma is the standard deviation of the
+    distribution
+
+    Examples:
+
+    >>> sql("select gaussdistribution(10,5)") # doctest: +ELLIPSIS
+    gaussdistribution(10,5)
+    -----------------------
+    ...
+
+    """
+
+    try:
+        ret=random.gauss(args[0],args[1])
+    except ValueError:
+        return None
+
+    return ret
+
+gaussdistribution.registered=True
+
+
+def sqroot(*args):
+
+    """
+    .. function:: sqroot(int) -> int
+
+    Returns the square root of a given argument.
+
+    Examples:
+
+    >>> table1('''
+    ... 25
+    ... ''')
+    >>> sql("select sqroot(a) from table1")
+    sqroot(a)
+    ---------
+    5.0
+
+    """
+
+    try:
+        ret=math.sqrt(args[0])
+    except ValueError:
+        return None
+    
+    return ret
+
+sqroot.registered=True
+
+def safediv(*args):
+
+    """
+    .. function:: safediv(int, int, int) -> int
+
+    Returns the first argument, when the division of the two subsequent numbers
+    includes zero in denominator (i.e. in third argument)
+
+    Examples:
+
+    >>> sql("select safeDiv(1,5,0)")
+    safeDiv(1,5,0)
+    --------------
+    1
+
+    """
+
+    if args[2]==0:
+        return args[0]
+    else:
+        return (args[1]/args[2])
+
+
+
+safediv.registered=True
+
+if not ('.' in __name__):
+    """
+    This is needed to be able to test the function, put it at the end of every
+    new function you create
+    """
+    import sys
+    import setpath
+    from functions import *
+    testfunction()
+    if __name__ == "__main__":
+        reload(sys)
+        sys.setdefaultencoding('utf-8')
+        import doctest
+        doctest.testmod()
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+import numba
+import numpy as np
+from loggingtools import log_with
+from numba import f8, i8
+
+from crowddynamics.core.steering.quickest_path import distance_map, \
+    direction_map
+from crowddynamics.core.vector2D import normalize
+
+
+@log_with(arguments=False, timed=True)
+@numba.jit((f8[:, :], numba.types.Tuple((f8[:, :], f8[:, :])),
+            numba.types.Tuple((f8[:, :], f8[:, :])), f8, f8),
+           nopython=True, nogil=True, cache=True)
+def obstacle_handling(dmap_obs, dir_map_obs, dir_map_targets, radius, strength):
+    r"""
+    Function that merges two direction maps together. Let distance map from
+    obstacles be :math:`\Phi(\mathbf{x})` and :math:`\lambda(x)`
+    be any decreasing function :math:`\frac{\partial}{\partial\Phi}\lambda(x) < 0` of
+    distance from obstacles such that
+
+    .. math::
+       \lambda(\Phi) &=
+       \begin{cases}
+       1 & \Phi = 0 \\
+       0 & \Phi > M > 0
+       \end{cases}
+
+    Take weighted average between the direction from the obstacles and the
+    direction from the target using :math:`p` using the decreasing function
+    defined above.
+
+    .. math::
+       p &= \lambda(\Phi(\mathbf{x})) \\
+       \hat{\mathbf{e}}_{out} &= \mathcal{N}\big(p \hat{\mathbf{e}}_{obstacle} +
+       (1 - p) \hat{\mathbf{e}}_{target}\big)
+
+    Numerically this algorithm uses exponential function as :math:`\lambda`
+
+    .. math::
+       c^{\frac{x}{r}}
+
+    Args:
+        dmap_obs:
+        dir_map_obs:
+        dir_map_targets:
+        radius (float):
+            Radius
+        strength (float):
+            Value between (0, 1). Value denoting the strength of dir_map1 at
+            distance of radius.
+
+    Returns:
+        Tuple[numpy.ndarray, numpy.ndarray]:
+    """
+    u1, v1 = dir_map_obs
+    u2, v2 = dir_map_targets
+    u_out, v_out = np.copy(u2), np.copy(v2)
+
+    n, m = dmap_obs.shape
+    for i in range(n):
+        for j in range(m):
+            # Distance from the obstacles
+            x = -dmap_obs[i, j]
+            if 0 < x < radius:
+                # Decreasing function
+                p = strength ** (x / radius)
+                # Weighted average
+                u_out[i, j] = - p * u1[i, j] + (1 - p) * u2[i, j]
+                v_out[i, j] = - p * v1[i, j] + (1 - p) * v2[i, j]
+
+    # Normalize the output
+    l = np.hypot(u_out, v_out)
+    return u_out / l, v_out / l
+
+
+@numba.jit((f8[:, :], numba.types.Tuple((f8[:, :], f8[:, :])),
+            f8[:, :], i8[:, :], f8, f8),
+           nopython=True, nogil=True, cache=True)
+def obstacle_handling_continuous(dmap_obs, dir_map_obs, direction_target,
+                                 indices, radius, strength):
+    n, m = dmap_obs.shape
+    u1, v1 = dir_map_obs
+    new_direction = np.copy(direction_target)
+
+    for k in range(len(indices)):
+        i, j = indices[k, 0], indices[k, 1]
+        u2, v2 = direction_target[k, 1], direction_target[k, 1]
+        x = -dmap_obs[i, j]
+
+        if not (0 <= i < n and 0 <= j < m):
+            continue
+
+        if 0 < x < radius:
+            # Decreasing function
+            p = strength ** (x / radius)
+            # Weighted average
+            new_direction[k, 0] = - p * u1[i, j] + (1 - p) * u2
+            new_direction[k, 1] = - p * v1[i, j] + (1 - p) * v2
+            new_direction[k, :] = normalize(new_direction[k, :])
+
+    return new_direction
+
+
+@log_with(arguments=False, timed=True)
+def direction_map_obstacles(mgrid, obstacles):
+    """Vector field towards obstacles"""
+    dmap_obs = distance_map(mgrid, obstacles, None)
+    dir_map_obs = direction_map(dmap_obs)
+    return dir_map_obs, dmap_obs
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+#Author: OMKAR PATHAK
+#Program to convert decimal to its equivalent binary
+
+def decimalToBinary(n):
+   '''Function to print binary number for the input decimal using recursion'''
+   if n > 1:
+       decimalToBinary(n//2)
+   print(n % 2,end = '')
+
+if __name__ == '__main__':
+    userInput = int(input('Enter the decimal number to find its binary equivalent: '))
+    decimalToBinary(userInput)
+    print()
+
+Query: function that calculates distance
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+
+import django.contrib.auth
+from django.core.exceptions import PermissionDenied
+
+from modernrpc.core import rpc_method
+from modernrpc.core import REQUEST_KEY
+
+__all__ = (
+    'login',
+    'login_krbv',
+    'logout',
+)
+
+
+@rpc_method(name='Auth.login')
+def login(username, password, **kwargs):
+    """
+    .. function:: XML-RPC Auth.login(username, password)
+
+        Login into Kiwi TCMS.
+
+        :param username: A Kiwi TCMS login or email address
+        :type username: str
+        :param password: The password
+        :type password: str
+        :return: Session ID
+        :rtype: str
+        :raises PermissionDenied: if username or password doesn't match or missing
+    """
+    # Get the current request
+    request = kwargs.get(REQUEST_KEY)
+
+    if not username or not password:
+        raise PermissionDenied('Username and password is required')
+
+    user = django.contrib.auth.authenticate(request, username=username, password=password)
+    if user is not None:
+        django.contrib.auth.login(request, user)
+        return request.session.session_key
+
+    raise PermissionDenied('Wrong username or password')
+
+
+@rpc_method(name='Auth.login_krbv')
+def login_krbv(**kwargs):
+    """
+    .. function:: XML-RPC Auth.login_krbv()
+
+        Login into Kiwi TCMS deployed with Kerberos.
+
+        :return: Session ID
+        :rtype: str
+    """
+    from django.contrib.auth.middleware import RemoteUserMiddleware
+
+    # Get the current request
+    request = kwargs.get(REQUEST_KEY)
+
+    middleware = RemoteUserMiddleware()
+    middleware.process_request(request)
+
+    return request.session.session_key
+
+
+@rpc_method(name='Auth.logout')
+def logout(**kwargs):
+    """
+    .. function:: XML-RPC Auth.logout()
+
+        Delete session information
+
+        :return: None
+    """
+    # Get the current request
+    request = kwargs.get(REQUEST_KEY)
+    django.contrib.auth.logout(request)
+
