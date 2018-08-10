@@ -1,0 +1,677 @@
+# function for doing a morph between two sounds using the stft
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import get_window
+import sys, os
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models/'))
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../transformations/'))
+import stft as STFT
+import utilFunctions as UF
+import stftTransformations as STFTT
+
+def main(inputFile1='../../sounds/ocean.wav', inputFile2='../../sounds/speech-male.wav', window1='hamming',  window2='hamming', 
+	M1=1024, M2=1024, N1=1024, N2=1024, H1=256, smoothf = .5, balancef = 0.2):
+	"""
+	Function to perform a morph between two sounds
+	inputFile1: name of input sound file to be used as source
+	inputFile2: name of input sound file to be used as filter
+	window1 and window2: windows for both files
+	M1 and M2: window sizes for both files
+	N1 and N2: fft sizes for both sounds
+	H1: hop size for sound 1 (the one for sound 2 is computed automatically)
+	smoothf: smoothing factor to be applyed to magnitude spectrum of sound 2 before morphing
+	balancef: balance factor between booth sounds, 0 is sound 1 and 1 is sound 2
+	"""
+
+	# read input sounds
+	(fs, x1) = UF.wavread(inputFile1)
+	(fs, x2) = UF.wavread(inputFile2)
+
+	# compute analysis windows
+	w1 = get_window(window1, M1)
+	w2 = get_window(window2, M2)
+
+	# perform morphing
+	y = STFTT.stftMorph(x1, x2, fs, w1, N1, w2, N2, H1, smoothf, balancef)
+
+	# compute the magnitude and phase spectrogram of input sound (for plotting)
+	mX1, pX1 = STFT.stftAnal(x1, w1, N1, H1)
+	
+	# compute the magnitude and phase spectrogram of output sound (for plotting)
+	mY, pY = STFT.stftAnal(y, w1, N1, H1)
+	
+	# write output sound
+	outputFile = 'output_sounds/' + os.path.basename(inputFile1)[:-4] + '_stftMorph.wav'
+	UF.wavwrite(y, fs, outputFile)
+
+	# create figure to plot
+	plt.figure(figsize=(12, 9))
+
+	# frequency range to plot
+	maxplotfreq = 10000.0
+
+	# plot sound 1
+	plt.subplot(4,1,1)
+	plt.plot(np.arange(x1.size)/float(fs), x1)
+	plt.axis([0, x1.size/float(fs), min(x1), max(x1)])
+	plt.ylabel('amplitude')
+	plt.xlabel('time (sec)')
+	plt.title('input sound: x')
+
+	# plot magnitude spectrogram of sound 1
+	plt.subplot(4,1,2)
+	numFrames = int(mX1[:,0].size)
+	frmTime = H1*np.arange(numFrames)/float(fs)                             
+	binFreq = fs*np.arange(N1*maxplotfreq/fs)/N1  
+	plt.pcolormesh(frmTime, binFreq, np.transpose(mX1[:,:int(N1*maxplotfreq/fs)+1]))
+	plt.xlabel('time (sec)')
+	plt.ylabel('frequency (Hz)')
+	plt.title('magnitude spectrogram of x')
+	plt.autoscale(tight=True)
+
+	# plot magnitude spectrogram of morphed sound 
+	plt.subplot(4,1,3)
+	numFrames = int(mY[:,0].size)
+	frmTime = H1*np.arange(numFrames)/float(fs)                             
+	binFreq = fs*np.arange(N1*maxplotfreq/fs)/N1 
+	plt.pcolormesh(frmTime, binFreq, np.transpose(mY[:,:int(N1*maxplotfreq/fs)+1]))
+	plt.xlabel('time (sec)')
+	plt.ylabel('frequency (Hz)')
+	plt.title('magnitude spectrogram of y')
+	plt.autoscale(tight=True)
+
+	# plot the morphed sound
+	plt.subplot(4,1,4)
+	plt.plot(np.arange(y.size)/float(fs), y)
+	plt.axis([0, y.size/float(fs), min(y), max(y)])
+	plt.ylabel('amplitude')
+	plt.xlabel('time (sec)')
+	plt.title('output sound: y')
+
+	plt.tight_layout()
+	plt.show()
+
+if __name__ == '__main__':
+	main()
+
+#Author: OMKAR PATHAK
+#Program to convert decimal to its equivalent binary
+
+def decimalToBinary(n):
+   '''Function to print binary number for the input decimal using recursion'''
+   if n > 1:
+       decimalToBinary(n//2)
+   print(n % 2,end = '')
+
+if __name__ == '__main__':
+    userInput = int(input('Enter the decimal number to find its binary equivalent: '))
+    decimalToBinary(userInput)
+    print()
+
+# -*- coding: utf-8 -*-
+# 2017/1/4 10:32
+"""
+-------------------------------------------------------------------------------
+Function:   a small simple of our web app
+Version:    1.0
+Author:     SLY
+Contact:    slysly759@gmail.com 
+ 
+-------------------------------------------------------------------------------
+"""
+
+import logging
+logging.basicConfig(level=logging.INFO)
+import asyncio, json, os, time
+from aiohttp import web
+# 首要解决的就是这个parse函数自解析
+from webframe.factory import logger_factory,data_factory, response_factory, auth_factory
+import webframe.orm
+from base import add_routes, add_static
+from jinja2 import Environment, FileSystemLoader
+from login_data_transfer import datetime_filter
+
+# 注意：这里jinjia的模板做了一个渲染映射 那么我很想重新写一个 感觉不复杂 主要是我用到的不复杂
+# 让我想想 我只需要一个html 渲染 和 html 路径映射的什么
+def init_jinjia2(app, **kw):
+    logging.info('init jinja2 template...')
+    options=dict(
+        autoescape = kw.get('autoescape', True),
+        block_start_string = kw.get('block_start_string','{%',),
+        block_end_string=kw.get('block_end_string','%}'),
+        variable_start_string=kw.get('variable_start_string','{{'),
+        variable_end_string=kw.get('variable_end_string','}}'),
+        auto_reload=kw.get('auto_reload', True)
+    )
+    path=kw.get('path',None)
+    if path is None:
+        # 以下代码如果只是将路径指向templates的绝对路径的话 作者你过来我保证不打死你
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'templates')
+        logging.info('The jinjia template is set here: %s'% path)
+        env = Environment(loader=FileSystemLoader(path), **options)
+        filters=kw.get('filters', None)
+        if filters is not None:
+            for name, f in filters.items():
+                env.filters[name]=f
+        app['__templating__']= env
+def init_fuckcnf():
+    conf=''.join(open('db.conf',encoding='utf8').readlines())
+    my_conf=eval(conf)# 没事别用轮子给自己加戏谢谢
+    global my_host,my_port,my_username,my_password,my_db
+    my_host=my_conf.get('host','localhost')
+    my_port=my_conf.get('port',3308)
+    my_username=my_conf.get('user','root')
+    my_password=my_conf.get('password','root')
+    my_db=my_conf.get('db','fuckblog')
+    return
+# 数据库初始化工具
+# 因为这个初始化只用到一次不是aio或者异步类型，我仅需要做链接测试建库就好
+def init_fuckdb():
+    import pymysql
+    con = pymysql.connections.Connection(host=my_host, port=my_port, user=my_username, password=my_password, charset='utf8mb4',
+                                         cursorclass=pymysql.cursors.DictCursor)
+    cur = con.cursor()
+    sql = ''.join(open('db-start.sql', encoding='utf8').readlines())
+    cur.execute(sql)
+    con.commit()
+    con.close()
+    return
+
+
+# def replace_jinja(app,**kw):
+#     path=kw.get('path',None)
+#     if path is None:
+#         # 以下代码如果只是将路径指向templates的绝对路径的话 作者你过来我保证不打死你
+#         path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'templates')
+#         logging.info('The jinjia template is set here: %s'% path)
+#         env = Environment(loader=FileSystemLoader(path))
+#         filters=kw.get('filters', None)
+#         if filters is not None:
+#             for name, f in filters.items():
+#                 env.filters[name]=f
+#         app['__templating__']= env
+
+# 现在需要对数据库配置进行一点外部化 （虽然达不到wp那种直接在网页上操作的，但随大流写记事本上总可以）
+
+
+@asyncio.coroutine
+def fuck_init(loop):
+    yield from webframe.orm.create_pool(loop=loop,host=my_host, port=my_port, user=my_username, password=my_password,db=my_db)
+    app = web.Application(loop=loop, middlewares=[
+        logger_factory, response_factory, data_factory,auth_factory
+    ])
+    init_jinjia2(app, filters=dict(datetime=datetime_filter))
+    add_routes(app,'api')
+    add_static(app)
+    srv=yield from loop.create_server(app.make_handler(),'127.0.0.1',9000)
+    logging.info('server is starting at 9000 port')
+    return srv
+init_fuckcnf()
+init_fuckdb()
+loop = asyncio.get_event_loop()
+loop.run_until_complete(fuck_init(loop))
+loop.run_forever()
+
+def func1(param1):
+    """Function 1
+    with 1 param
+
+    :param param1: 1st parameter
+    :type param1: type
+    :returns: None
+
+    """
+    return None
+
+
+def func2(param1, param2):
+    """Function 2
+    with 2 params
+
+    :param param1: 1st parameter
+    :type param1: type
+    :param param2: 2nd parameter
+
+    """
+    pass
+
+
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+##############################################################################
+# Configuration parameters for Google App Engine 
+##############################################################################
+KEEP_CACHED = False    # request a dummy url every 10secs to force caching app
+LOG_STATS = False      # log statistics
+DEBUG = False          # debug mode
+AUTO_RETRY = True      # force gae to retry commit on failure
+##############################################################################
+# All tricks in this file developed by Robin Bhattacharyya 
+##############################################################################
+
+
+import time
+import os
+import sys
+import logging
+import cPickle
+import pickle
+import wsgiref.handlers
+import datetime
+
+
+sys.path.append(os.path.dirname(__file__))
+sys.modules['cPickle'] = sys.modules['pickle']
+
+
+from gluon.settings import settings
+from google.appengine.api.labs import taskqueue
+
+
+if os.environ.get('SERVER_SOFTWARE', '').startswith('Devel'):
+    (settings.web2py_runtime, settings.web2py_runtime_gae, DEBUG) = \
+        ('gae:development', True, True)
+else:
+    (settings.web2py_runtime, settings.web2py_runtime_gae, DEBUG) = \
+        ('gae:production', True, False)
+
+
+import gluon.main
+
+
+def log_stats(fun):
+    """Function that will act as a decorator to make logging"""
+    def newfun(env, res):
+        """Log the execution time of the passed function"""        
+        timer = lambda t: (t.time(), t.clock())
+        (t0, c0) = timer(time)
+        executed_function = fun(env, res)
+        (t1, c1) = timer(time)
+        log_info = """**** Request: %.2fms/%.2fms (real time/cpu time)"""
+        log_info = log_info % ((t1 - t0) * 1000, (c1 - c0) * 1000)
+        logging.info(log_info)
+        return executed_function    
+    return newfun
+
+
+logging.basicConfig(level=35)
+
+
+def wsgiapp(env, res):
+    """Return the wsgiapp"""
+    if env['PATH_INFO'] == '/_ah/queue/default':
+        if KEEP_CACHED:
+            delta = datetime.timedelta(seconds=10)
+            taskqueue.add(eta=datetime.datetime.now() + delta)
+        res('200 OK',[('Content-Type','text/plain')])
+        return ['']
+    return gluon.main.wsgibase(env, res)
+
+
+if LOG_STATS or DEBUG:
+    wsgiapp = log_stats(wsgiapp)
+
+
+if AUTO_RETRY:
+    from gluon.contrib.gae_retry import autoretry_datastore_timeouts
+    autoretry_datastore_timeouts()
+
+
+def main():
+    """Run the wsgi app"""
+    wsgiref.handlers.CGIHandler().run(wsgiapp)
+
+
+if __name__ == '__main__':
+    main()
+
+def func1(param1):
+    """Function 1
+    with 1 param
+
+    Args:
+      param1(type): 1st parameter
+
+    Returns:
+      None
+
+    Raises:
+      Exception: an exception
+
+    """
+    return None
+
+
+def func2(param1, param2):
+    """Function 2
+    with 2 params
+
+    Args:
+      param1(type): 1st parameter
+      param2: 2nd parameter
+
+    Returns:
+
+    """
+    pass
+
+
+
+#!/usr/bin/python
+
+# Copyright 2014 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+"""Function for generating the SkUserConfig file, customized for Android."""
+
+import os
+import shutil
+
+
+AUTOGEN_WARNING = (
+"""
+///////////////////////////////////////////////////////////////////////////////
+//
+// THIS FILE IS AUTOGENERATED BY GYP_TO_ANDROID.PY. DO NOT EDIT.
+//
+// This file contains Skia's upstream include/config/SkUserConfig.h as a
+// reference, followed by the actual defines set for Android.
+//
+///////////////////////////////////////////////////////////////////////////////
+
+"""
+)
+
+BUILD_GUARD = 'SkUserConfig_Android_DEFINED'
+
+
+def generate_user_config(original_sk_user_config, require_sk_user_config,
+                         target_dir, defines):
+  """Generate the SkUserConfig file specific to the Android framework.
+
+  Android needs its #defines in its skia/include/core directory, so that other
+  libraries which use Skia's headers get the right definitions. This function
+  takes the existing sample version of SkUserConfig, checked into Skia, and
+  appends the defines from ordered_set, which is expected to be a
+  vars_dict_lib.OrderedSet containing the defines. The result is written to
+  target_dir/SkUserConfig.h
+
+  Args:
+      original_sk_user_config: Path to original SkUserConfig.h
+      require_sk_user_config: If True, raise an AssertionError if
+          SkUserConfig.h does not exist. Either way, if it does exist, copy it
+          into the new file.
+      target_dir: Directory within which the modified SkUserConfig.h will be
+          written. Its name will be the same basename as
+          original_sk_user_config. If None, the new file will be written to the
+          working directory.
+      defines: Iterable of defines to be appended to SkUserConfig.
+
+  Raises:
+      AssertionError: If original_sk_user_config does not exist.
+  """
+
+  sk_user_config_exists = os.path.exists(original_sk_user_config)
+  if require_sk_user_config:
+    assert sk_user_config_exists
+
+  dst_filename = os.path.basename(original_sk_user_config)
+  if target_dir:
+    dst_filename = os.path.join(target_dir, dst_filename)
+
+  with open(dst_filename, 'w') as dst:
+    dst.write(AUTOGEN_WARNING)
+
+    # Copy the original exactly. This is merely for reference. Many of the
+    # defines written to the file below, either manually or generated from the
+    # gyp files, have explanations in the original SkUserConfig.h
+    if sk_user_config_exists:
+      with open(original_sk_user_config, 'r') as original:
+        shutil.copyfileobj(original, dst)
+
+    # Now add the defines specific to Android. Write a custom build guard to
+    # ensure they don't get defined more than once.
+    dst.write('\n// Android defines:\n')
+    dst.write('#ifndef ' + BUILD_GUARD + '\n')
+    dst.write('#define ' + BUILD_GUARD + '\n')
+
+    # Add conditional defines manually:
+
+    # do this build check for other tools that still read this header
+    dst.write('#ifdef ANDROID\n')
+    dst.write('    #include <utils/misc.h>\n')
+    dst.write('#endif\n\n')
+
+    dst.write('#if __BYTE_ORDER == __BIG_ENDIAN\n')
+    dst.write('    #define SK_CPU_BENDIAN\n')
+    dst.write('    #undef  SK_CPU_LENDIAN\n')
+    dst.write('#else\n')
+    dst.write('    #define SK_CPU_LENDIAN\n')
+    dst.write('    #undef  SK_CPU_BENDIAN\n')
+    dst.write('#endif\n\n')
+
+    # Now add the defines from the gyp files.
+    for item in sorted(defines):
+      # Although our defines may have '=' in them, when written to the header
+      # there should be a space between the macro and what it replaces.
+      dst.write('#define ' + item.replace('=', ' ') + '\n')
+
+    dst.write('\n#endif // ' + BUILD_GUARD + '\n')
+
+"""
+*********************
+*                   *
+* Function rmDUPRXN *
+*                   *
+*********************
+
+PURPOSE:
+    Remove duplicate reactions from kpp file and combine all reaction rates.
+    Script is designed for DSMACC version DSMACC-testing available from:
+    https://github.com/pb866/DSMACC-testing.git
+
+INSTRUCTIONS:
+    - Run kpp and write screen output to a file with:
+      make kpp | tee <file name (default: make.tee)>
+    - Run script with:
+      python rmDUPRXN.py [<file name>]
+      Script argument is optional and default value will be used,
+      if obsolete.
+
+IMPORTED PYTHON LIBRARIES:
+    - sys
+
+FURTHER LIBRARIES:
+    - srchRXN (as sr) with functions duplicate reactions and save
+                      necessary data to the dictionary rrate
+    - frmtRXN (as fr) with a function to reformat the reaction rate string
+                      with combined rate constants
+    - fhandle (as fh) with a function to write the refined mechanims
+
+VARIABLES:
+    ftee:   file name of input tee file
+    ll:     array with all lines from tee file
+    duprxn: all lines from tee file with warnings about duplicate reactions
+    rrate:  dictionary with:
+            - key:      line number of first occurrence of duplicate reaction
+            - entry 0:  kpp line of first occurrence up to colon
+                        (excluding kinetic information)
+            - entry 1:  cominded rate constants/j values
+            - entry 2:  list of line numbers of all other occurrences of
+                        this duplicate reaction
+    fkpp:   path + name of kpp file retrieved from warnings
+    f:      index for input file
+"""
+
+# import libraries
+import sys
+import srchRXN as sr
+import frmtRXN as fr
+import fhandle as fh
+# specify system settings
+reload(sys)
+sys.setdefaultencoding('UTF8')
+
+# Retrieve file name from script arguments
+try:
+    ftee = sys.argv[1]
+except:
+    ftee = '../make.tee'
+
+# Assure input file is one folder level above:
+if ftee[:3] != '../':
+    ftee = '../'+ftee
+
+
+# Open input file
+with open(ftee, 'r')  as f:
+# save all lines in an array
+    ll = f.readlines()
+# find warnings about duplicate reactions and save to array
+    duprxn = [dr for dr in ll if ": Duplicate equation: " in dr]
+
+# create library with line numbers of first duplicate entry as key
+# - Reaction string up to colon (excluding rate constants) as first entry
+# - List of strings of rate constants as second entry
+# - List of line number with duplicate reactions (excluding first occurrence)
+#   as third entry
+rrate, fkpp = sr.retrRXN(duprxn)
+
+# Reformat reaction rate constants and combine same rate constants
+fr.cmbnRATES(rrate)
+# Rewrite refined mechanism
+fh.wrtKPP(rrate,fkpp)
+
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
+"""Function to sum frequency spectra."""
+
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
+
+from .io import save_pds, get_file_type
+from .io import HEN_FILE_EXTENSION
+from .base import _assign_value_if_none
+import numpy as np
+import logging
+import copy
+
+
+def sum_fspec(files, outname=None):
+    """Take a bunch of (C)PDSs and sums them."""
+    # Read first file
+    ftype0, contents = get_file_type(files[0])
+    pdstype = ftype0.replace('reb', '')
+
+    freq0 = contents.freq
+    pds0 = contents.power
+    epds0 = contents.power_err
+    nchunks0 = contents.m
+    rebin0 = 1
+    norm0 = contents.norm
+
+    tot_pds = pds0 * nchunks0
+    tot_epds = epds0 ** 2 * nchunks0
+    tot_npds = nchunks0
+    tot_contents = copy.copy(contents)
+    outname = _assign_value_if_none(outname,
+                                    'tot_' + ftype0 + HEN_FILE_EXTENSION)
+
+    for f in files[1:]:
+        ftype, contents = get_file_type(f)
+        pdstype = ftype.replace('reb', '')
+
+        freq = contents.freq
+        pds = contents.power
+        epds = contents.power_err
+        nchunks = contents.m
+        rebin = 1
+        norm = contents.norm
+        fftlen = contents.fftlen
+
+        assert ftype == ftype0, 'Files must all be of the same kind'
+        assert np.all(rebin == rebin0), \
+            'Files must be rebinned in the same way'
+        np.testing.assert_array_almost_equal(
+            freq, freq0, decimal=int(-np.log10(1 / fftlen) + 2),
+            err_msg='Frequencies must coincide')
+        assert norm == norm0, 'Files must have the same normalization'
+
+        tot_pds += pds * nchunks
+        tot_epds += epds ** 2 * nchunks ** 2
+        tot_npds += nchunks
+
+    tot_contents.power = tot_pds / tot_npds
+    tot_contents.power_err = np.sqrt(tot_epds) / tot_npds
+    tot_contents.m = tot_npds
+
+    logging.info('Saving %s to %s' % (pdstype, outname))
+    save_pds(tot_contents, outname)
+
+    return tot_contents
+
+
+def main(args=None):
+    """Main function called by the `HENsumfspec` command line script."""
+    import argparse
+
+    description = 'Sum (C)PDSs contained in different files'
+    parser = argparse.ArgumentParser(description=description)
+
+    parser.add_argument("files", help="List of light curve files", nargs='+')
+
+    parser.add_argument("-o", "--outname", type=str, default=None,
+                        help='Output file name for summed (C)PDS. Default:' +
+                        ' tot_(c)pds' + HEN_FILE_EXTENSION)
+
+    args = parser.parse_args(args)
+
+    sum_fspec(args.files, args.outname)
+
+# -*- coding: utf-8 -*-
+'''
+Functions that help access comments
+of objects.
+'''
+
+# from django
+from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.sites.models import Site
+
+from django_comments.models import Comment
+
+# from stdlib
+from datetime import datetime
+
+
+def add_comment(objs, comments, user, submit_date=None):
+    """
+    Generic approach adding django.comment for an object.
+    params:
+        @objs: [model, model,]
+        @submit_date: datetime object
+    >>> from django.contrib.auth.models import User
+    >>> testuser = User.objects.get(email='user@example.com')
+    >>> from tcms.testruns.models import TestCaseRun as Run
+    >>> testrun = Run.objects.get(pk=171675)
+    >>> comments = 'stupid comments by Homer'
+    >>> add_comment([testrun,], comments, testuser)
+    """
+    site = Site.objects.get(pk=settings.SITE_ID)
+    c_type = ContentType.objects.get_for_model(model=objs[0].__class__)
+    create_comment = Comment.objects.create
+    for obj in objs:
+        create_comment(content_type=c_type,
+                       site=site,
+                       object_pk=obj.pk,
+                       user=user,
+                       comment=comments,
+                       submit_date=submit_date or datetime.now(),
+                       user_email=user.email,
+                       user_name=user.username)
+
