@@ -1,0 +1,1653 @@
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+#
+# growler/aio/http_protocol.py
+#
+"""
+Code containing Growler's asyncio.Protocol code for handling HTTP requests.
+"""
+
+import traceback
+from sys import stderr
+from asyncio import Future
+from .protocol import GrowlerProtocol
+from growler.http.responder import GrowlerHTTPResponder
+from growler.http.response import HTTPResponse
+from growler.http.errors import (
+    HTTPError
+)
+
+
+# Or should this be called HTTPGrowlerProtocol?
+class GrowlerHTTPProtocol(GrowlerProtocol):
+    """
+    GrowlerProtocol dealing with HTTP requests. Objects are created with a
+    growler.App instance, which contains the relevant event_loop. The default
+    responder_type is GrowlerHTTPResponder, which does the data parsing and
+    req/res creation.
+
+    Additional responders may be created and used, the req/res pair may be
+    lost, but only one GrowlerHTTPProtocol object will persist through the
+    connection; it may be wise to store HTTP information in this.
+
+    To change the responder type to something other than GrowlerHTTPResponder,
+    overload or replace the http_responder_factory method.
+    """
+
+    client_method = None
+    client_query = None
+    client_headers = None
+
+    def __init__(self, app, loop=None):
+        """
+        Construct a GrowlerHTTPProtocol object. This should only be called from
+        a growler.HTTPServer instance (or any asyncio.create_server function).
+
+        Parameters
+        ----------
+        app : growler.Application
+            Typically a growler application which is the 'target object' of
+            this protocol. Any callable with a 'loop' attribute and a
+            handle_client_request coroutine method should work.
+        """
+        self.http_application = app
+        super().__init__(loop=loop,
+                         responder_factory=self.http_responder_factory)
+
+    @staticmethod
+    def http_responder_factory(proto):
+        """
+        The default factory function which creates a GrowlerHTTPResponder with
+        this object as the parent protocol, and the application's req/res
+        factory functions.
+
+        To change the default responder, overload this method with the same
+        to return your
+        own responder.
+
+        Params
+        ------
+        proto : GrowlerHTTPProtocol
+            Explicitly passed protocol object (actually it's what would be
+            'self'!)
+
+        Note
+        ----
+        This method is decorated with @staticmethod, as the connection_made
+        method of GrowlerProtocol explicitly passes `self` as a parameters,
+        instead of treating as a bound method.
+        """
+        return GrowlerHTTPResponder(
+            proto,
+            request_factory=proto.http_application._request_class,
+            response_factory=proto.http_application._response_class,
+        )
+
+    def handle_error(self, error):
+        """
+        An error handling function which will be called when an error is raised
+        during a responder's on_data() function. There is no default
+        functionality and the subclasses must overload this.
+
+        Parameters
+        ----------
+        error : Exception
+            Exception thrown during code execution
+        """
+        # This error was HTTP-related
+        if isinstance(error, HTTPError):
+            err_code = error.code
+            err_msg = error.msg
+            err_info = ''
+        else:
+            err_code = 500
+            err_msg = "Server Error"
+            err_info = "%s" % error
+            print("Unexpected Server Error", file=stderr)
+            traceback.print_tb(error.__traceback__, file=stderr)
+
+        # for error_handler in self.http_application.next_error_handler(req):
+        err_str = (
+            "<html>"
+            "<head></head>"
+            "<body><h1>HTTP Error : {code} {message}</h1><p>{info}</p></body>"
+            "</html>\n"
+        ).format(
+            code=err_code,
+            message=err_msg,
+            info=err_info
+        )
+
+        header_info = {
+            'code': err_code,
+            'msg': err_msg,
+            'date': HTTPResponse.get_current_time(),
+            'length': len(err_str.encode()),
+            'contents': err_str
+        }
+
+        response = '\r\n'.join((
+            "HTTP/1.1 {code} {msg}",
+            "Content-Type: text/html; charset=UTF-8",
+            "Content-Length: {length}",
+            "Date: {date}",
+            "",
+            "{contents}")).format(**header_info)
+
+        self.transport.write(response.encode())
+
+    def begin_application(self, req, res):
+        """
+        Entry point for the application middleware chain for an asyncio
+        event loop.
+        """
+        # Add the middleware processing to the event loop - this *should*
+        # change the call stack so any server errors do not link back to this
+        # function
+        self.loop.create_task(self.http_application.handle_client_request(req, res))
+
+    def body_storage_pair(self):
+        """
+        Return reader/writer pair for storing receiving body data.
+        These are event-loop specific objects.
+
+        The reader should be an awaitable object that returns the
+        body data once created.
+        """
+        future = Future()
+
+        def send_body():
+            nonlocal future
+            data = yield
+            future.set_result(data)
+            yield
+
+        sender = send_body()
+        next(sender)
+        return future, sender
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+
+#=============================================================================
+# Created by Kirstie Whitaker
+# at OHBM 2016 Brainhack in Lausanne, June 2016
+# Contact: kw401@cam.ac.uk
+#=============================================================================
+
+#=============================================================================
+# IMPORTS
+#=============================================================================
+import os
+import sys
+import argparse
+import textwrap
+from glob import glob
+
+import numpy as np
+
+import nibabel as nib
+from nilearn import plotting
+from nilearn.plotting import cm
+from nilearn.image import reorder_img
+from nilearn.image.resampling import coord_transform
+
+import imageio
+
+#=============================================================================
+# FUNCTIONS
+#=============================================================================
+def setup_argparser():
+    '''
+    Code to read in arguments from the command line
+    Also allows you to change some settings
+    '''
+    # Build a basic parser.
+    help_text = ('Plot an anatomical volume in subject space,\noptionally overlay another image in the same space,\nand make into a gif')
+
+    sign_off = 'Author: Kirstie Whitaker <kw401@cam.ac.uk>'
+
+    parser = argparse.ArgumentParser(description=help_text,
+                                     epilog=sign_off,
+                                     formatter_class=argparse.RawTextHelpFormatter)
+
+    # Now add the arguments
+    parser.add_argument(dest='anat_file',
+                            type=str,
+                            metavar='anat_file',
+                            help='Nifti or mgz file in subject space that you want to visualise')
+
+    parser.add_argument('-o', '--overlay_file',
+                            type=str,
+                            metavar='overlay_file',
+                            help='Nifti or mgz file in subject space that you want to overlay',
+                            default=None)
+
+    parser.add_argument('-a,', '--axis',
+                            type=str,
+                            metavar='axis',
+                            help=textwrap.dedent("The axis you'd like to project.\nOptions are:\n  x: sagittal\n  y: coronal\n  z: axial\n\nDefault: ortho"),
+                            default='x')
+
+    parser.add_argument('-c', '--cmap',
+                            type=str,
+                            metavar='cmap',
+                            help=textwrap.dedent('Any matplotlib colormap listed at\n  http://matplotlib.org/examples/color/colormaps_reference.html\nDefault: gray'),
+                            default='gray')
+
+    parser.add_argument('-oc', '--overlay_cmap',
+                            type=str,
+                            metavar='overlay_cmap',
+                            help=textwrap.dedent('Any matplotlib colormap listed at\n  http://matplotlib.org/examples/color/colormaps_reference.html\nDefault: prism'),
+                            default='prism')
+
+    parser.add_argument('--black_bg',
+                            action='store_true',
+                            help=textwrap.dedent('Set the background to black.\nDefault: White'),
+                            default=False)
+
+    parser.add_argument('--annotate',
+                            action='store_true',
+                            help=textwrap.dedent('Add L and R labels to images.\nDefault: False'),
+                            default=False)
+
+    parser.add_argument('-t', '--thr',
+                            type=float,
+                            metavar='thr',
+                            help=textwrap.dedent('Mask the input image such that all values\n  which have an absolute value less than this threshold\n  are not shown.\nIf None then no thresholding is undertaken.\nDefault: None'),
+                            default=None)
+
+    parser.add_argument('--dpi',
+                            type=float,
+                            metavar='dpi',
+                            help='DPI of output png file\nDefault: 300',
+                            default=300)
+
+    arguments = parser.parse_args()
+
+    return arguments, parser
+
+
+#=============================================================================
+# SET SOME VARIABLES
+#=============================================================================
+# Read in the arguments from argparse
+arguments, parser = setup_argparser()
+
+anat_file = arguments.anat_file
+overlay_file = arguments.overlay_file
+axis = arguments.axis
+cmap = arguments.cmap
+overlay_cmap = arguments.overlay_cmap
+threshold = arguments.thr
+black_bg = arguments.black_bg
+annotate = arguments.annotate
+dpi = arguments.dpi
+
+# Set a couple of hard coded options
+draw_cross = False
+
+#===============================================================================
+# Make a bunch of dictionaries that allow you to loop through x, y and z
+#===============================================================================
+# The x, y, z coord_transform dictionaries contains keys that
+# are either 'x', 'y', 'z' and values that are functions to
+# convert that axis to alligned space.
+def coord_transform_x(x, img):
+    x, y, z = coord_transform(x, 0, 0, img.affine)
+    return x
+def coord_transform_y(y, img):
+    x, y, z = coord_transform(0, y, 0, img.affine)
+    return y
+def coord_transform_z(z, img):
+    x, y, z = coord_transform(0, 0, z, img.affine)
+    return z
+
+coord_transform_dict = { 'x' : coord_transform_x,
+                         'y' : coord_transform_y,
+                         'z' : coord_transform_z }
+
+# The x, y, z slice dictionaries contains keys that
+# are either 'x', 'y', 'z' and values that are functions to
+# return the slice through a specific coordinate.
+def slice_x(x, img):
+    s = img.get_data()[x, :, :]
+    return s
+def slice_y(y, img):
+    s = img.get_data()[:, y, :]
+    return s
+def slice_z(z, img):
+    s = img.get_data()[:, :, z]
+    return s
+
+slice_dict = { 'x' : slice_x,
+               'y' : slice_y,
+               'z' : slice_z }
+
+# The x, y, z dim lookup dictionary contains keys that
+# are either 'x', 'y', 'z' and values that correspond to
+# the axis of the image.
+# For example, 'x' is the first axis of the image: 0
+dim_lookup_dict = { 'x' : 0,
+                    'y' : 1,
+                    'z' : 2 }
+
+# The x, y, z label lookup dictionary contains keys that
+# are either 'x', 'y', 'z' and values that correspond to
+# the name of the projection.
+label_lookup_dict = { 'x' : 'sagittal',
+                      'y' : 'coronal',
+                      'z' : 'axial' }
+
+#===============================================================================
+# Get the colormap from nilearn
+#===============================================================================
+if hasattr(cm, cmap):
+    cmap = getattr(cm, cmap)
+
+#===============================================================================
+# Set up the output directory & gif file name
+#===============================================================================
+# First figure out the name of the overlay file
+if overlay_file is None:
+    overlay_name = ''
+elif '.mgz' in overlay_file:
+    overlay_name = '_' + os.path.basename(overlay_file).rsplit('.mgz', 1)[0]
+else:
+    overlay_name = '_' + os.path.basename(overlay_file).rsplit('.nii', 1)[0]
+
+# Add that overlay string to the pngs folder and gif file
+if '.mgz' in anat_file:
+    pngs_dir = anat_file.rsplit('.mgz', 1)[0] + '_PNGS'
+    gif_file = (anat_file.rsplit('.mgz', 1)[0]
+                    + overlay_name
+                    + '_{}.gif'.format(label_lookup_dict[axis]))
+else:
+    pngs_dir = anat_file.rsplit('.nii', 1)[0] + '_PNGS'
+    gif_file = (anat_file.rsplit('.nii', 1)[0]
+                    + overlay_name
+                    + '_{}.gif'.format(label_lookup_dict[axis]))
+
+if not os.path.isdir(pngs_dir):
+    os.makedirs(pngs_dir)
+
+#===============================================================================
+# Read in the images using nibabel
+#===============================================================================
+img = nib.load(anat_file)
+
+# Convert the data to float
+data = img.get_data()
+data = data.astype('float')
+
+# Reslice the image so there are no rotations in the affine.
+# This step is actually included in the nilearn plot_anat command below
+# but it runs faster if the image has already been resliced.
+img_reslice = reorder_img(img, resample='continuous')
+
+# Do the same if you have an overlay file too
+if not overlay_file is None:
+    overlay_img = nib.load(overlay_file)
+    data = overlay_img.get_data()
+    data = data.astype('float')
+    overlay_img_reslice = reorder_img(overlay_img, resample='nearest')
+
+#===============================================================================
+# Plot each slice unless it's empty!
+#===============================================================================
+
+# Loop through all the slices in this dimension
+for i in np.arange(img_reslice.shape[dim_lookup_dict[axis]], dtype='float'):
+
+    # Test to see if there is anything worth showing in the image
+    # If the anat image (img) is empty then don't make a picture
+    if slice_dict[axis](i, img).mean() == 0.0:
+        continue
+
+    # Get the co-ordinate you want
+    coord = coord_transform_dict[axis](i, img_reslice)
+
+    # Make the image
+    slicer = plotting.plot_anat(img_reslice,
+                                threshold=None,
+                                cmap=cmap,
+                                display_mode=axis,
+                                black_bg=black_bg,
+                                annotate=annotate,
+                                draw_cross=draw_cross,
+                                cut_coords=(coord,))
+
+    # Add the overlay if given
+    if not overlay_file is None:
+        slicer.add_overlay(overlay_img_reslice, cmap=overlay_cmap)
+
+    # Save the png file
+    output_file = os.path.join(pngs_dir,
+                       '{}_{:03.0f}{}.png'.format(label_lookup_dict[axis],
+                                                    i,
+                                                    overlay_name))
+
+    slicer.savefig(output_file, dpi=dpi)
+
+    slicer.close()
+
+#===============================================================================
+# Now make a gif!
+#===============================================================================
+
+png_list = glob(os.path.join(pngs_dir,
+                    '{}*{}.png'.format(label_lookup_dict[axis], overlay_name)))
+
+png_list.sort()
+
+with imageio.get_writer(gif_file, mode='I') as writer:
+    for fname in png_list:
+        image = imageio.imread(fname)
+        writer.append_data(image)
+
+#===============================================================================
+# WAY TO GO!
+#===============================================================================
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+"""Code to compute the kernel two-sample test and estimate the maximum
+mean discrepancy test statistic.
+
+See: "A Kernel Two-Sample Test", Arthur Gretton, Karsten M. Borgwardt,
+Malte J. Rasch, Bernhard Scholkopf, Alexander Smola; JMLR
+13(Mar):723-773, 2012.
+http://jmlr.csail.mit.edu/papers/v13/gretton12a.html
+
+See: https://github.com/emanuele/kernel_two_sample_test
+
+Author: Emanuele Olivetti
+"""
+
+from __future__ import division
+import numpy as np
+from sys import stdout
+from sklearn.metrics import pairwise_kernels
+
+
+def MMD2u(K, m, n):
+    """The MMD^2_u unbiased statistic.
+    """
+    Kx = K[:m, :m]
+    Ky = K[m:, m:]
+    Kxy = K[:m, m:]
+    return 1.0 / (m * (m - 1.0)) * (Kx.sum() - Kx.diagonal().sum()) + \
+        1.0 / (n * (n - 1.0)) * (Ky.sum() - Ky.diagonal().sum()) - \
+        2.0 / (m * n) * Kxy.sum()
+
+
+def compute_null_distribution(K, m, n, iterations=10000, verbose=False,
+                              random_state=None, marker_interval=1000):
+    """Compute the bootstrap null-distribution of MMD2u.
+    """
+    if type(random_state) == type(np.random.RandomState()):
+        rng = random_state
+    else:
+        rng = np.random.RandomState(random_state)
+
+    mmd2u_null = np.zeros(iterations)
+    for i in range(iterations):
+        if verbose and (i % marker_interval) == 0:
+            print(i),
+            stdout.flush()
+        idx = rng.permutation(m+n)
+        K_i = K[idx, idx[:, None]]
+        mmd2u_null[i] = MMD2u(K_i, m, n)
+
+    if verbose:
+        print("")
+
+    return mmd2u_null
+
+
+def compute_null_distribution_given_permutations(K, m, n, permutation,
+                                                 iterations=None):
+    """Compute the bootstrap null-distribution of MMD2u given
+    predefined permutations.
+
+    Note:: verbosity is removed to improve speed.
+    """
+    if iterations is None:
+        iterations = len(permutation)
+
+    mmd2u_null = np.zeros(iterations)
+    for i in range(iterations):
+        idx = permutation[i]
+        K_i = K[idx, idx[:, None]]
+        mmd2u_null[i] = MMD2u(K_i, m, n)
+
+    return mmd2u_null
+
+
+def kernel_two_sample_test(X, Y, kernel_function='rbf', iterations=10000,
+                           verbose=False, random_state=None, **kwargs):
+    """Compute MMD^2_u, its null distribution and the p-value of the
+    kernel two-sample test.
+
+    Note that extra parameters captured by **kwargs will be passed to
+    pairwise_kernels() as kernel parameters. E.g. if
+    kernel_two_sample_test(..., kernel_function='rbf', gamma=0.1),
+    then this will result in getting the kernel through
+    kernel_function(metric='rbf', gamma=0.1).
+    """
+    m = len(X)
+    n = len(Y)
+    XY = np.vstack([X, Y])
+    K = pairwise_kernels(XY, metric=kernel_function, **kwargs)
+    mmd2u = MMD2u(K, m, n)
+    if verbose:
+        print("MMD^2_u = %s" % mmd2u)
+        print("Computing the null distribution.")
+
+    mmd2u_null = compute_null_distribution(K, m, n, iterations,
+                                           verbose=verbose,
+                                           random_state=random_state)
+    p_value = max(1.0/iterations, (mmd2u_null > mmd2u).sum() /
+                  float(iterations))
+    if verbose:
+        print("p-value ~= %s \t (resolution : %s)" % (p_value, 1.0/iterations))
+
+    return mmd2u, mmd2u_null, p_value
+
+
+if __name__ == '__main__':
+
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import pairwise_distances
+
+    np.random.seed(0)
+
+    m = 20
+    n = 20
+    d = 2
+
+    sigma2X = np.eye(d)
+    muX = np.zeros(d)
+
+    sigma2Y = np.eye(d)
+    muY = np.ones(d)
+    # muY = np.zeros(d)
+
+    iterations = 10000
+
+    X = np.random.multivariate_normal(mean=muX, cov=sigma2X, size=m)
+    Y = np.random.multivariate_normal(mean=muY, cov=sigma2Y, size=n)
+
+    if d == 2:
+        plt.figure()
+        plt.plot(X[:, 0], X[:, 1], 'bo')
+        plt.plot(Y[:, 0], Y[:, 1], 'rx')
+
+    sigma2 = np.median(pairwise_distances(X, Y, metric='euclidean'))**2
+    mmd2u, mmd2u_null, p_value = kernel_two_sample_test(X, Y,
+                                                        kernel_function='rbf',
+                                                        gamma=1.0/sigma2,
+                                                        verbose=True)
+    # mmd2u, mmd2u_null, p_value = kernel_two_sample_test(X, Y,
+    #                                                     kernel_function='linear',
+    #                                                     verbose=True)
+
+    plt.figure()
+    prob, bins, patches = plt.hist(mmd2u_null, bins=50, normed=True)
+    plt.plot(mmd2u, prob.max()/30, 'w*', markersize=24, markeredgecolor='k',
+             markeredgewidth=2, label="$MMD^2_u = %s$" % mmd2u)
+    plt.xlabel('$MMD^2_u$')
+    plt.ylabel('$p(MMD^2_u)$')
+    plt.legend(numpoints=1)
+    plt.title('$MMD^2_u$: null-distribution and observed value. $p$-value=%s'
+              % p_value)
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+# -*- coding: utf-8 -*-
+"""
+Code for saving and loading user-selected events/stations.
+
+:copyright:
+    Mazama Science, IRIS
+:license:
+    GNU Lesser General Public License, Version 3
+    (http://www.gnu.org/copyleft/lesser.html)
+"""
+
+from __future__ import (absolute_import, division, print_function)
+import copy
+from obspy.core.inventory.inventory import Inventory
+from obspy.core.event.catalog import Catalog
+
+
+def get_filtered_inventory(inventory, stations_iter):
+    """
+    Given an inventory and an iterator of selected network/station/channel items, return
+    an inventory containing only the selected items.
+    """
+    networks = {}
+    stations = {}
+    for (network, station, channel) in stations_iter:
+        # Create a station record if necessary, and add this channel to it
+        full_station_code = "%s.%s" % (network.code, station.code)
+        if full_station_code not in stations:
+            f_station = copy.copy(station)
+            f_station.channels = []
+            stations[full_station_code] = f_station
+            # Create a network record if necessary, and add this station to it
+            if network.code not in networks:
+                f_network = copy.copy(network)
+                f_network.stations = []
+                networks[network.code] = f_network
+            networks[network.code].stations.append(f_station)
+        stations[full_station_code].channels.append(channel)
+
+    return Inventory(list(networks.values()), inventory.source, inventory.sender)
+
+
+def get_filtered_catalog(catalog, events_iter):
+    """
+    Given a catalog and an iterator of selected events, return a catalog containing only the selected events.
+    """
+    return Catalog(list(events_iter))
+
+
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+# Copyright (c) 2017, Henrique Miranda
+# All rights reserved.
+#
+# This file is part of the phononwebsite project
+#
+""" Code the dictionary in json format """
+import json
+import numpy as np
+
+class JsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.ndarray,np.number)):
+            if np.iscomplexobj(obj):
+                return [obj.real, obj.imag]
+            else:
+                return obj.tolist()
+        return(json.JSONEncoder.default(self, obj))
+
+
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+from __future__ import absolute_import, division, print_function
+import os
+import numpy as np
+import pandas as pd
+from sqlalchemy import create_engine
+from lsst.utils import getPackageDir
+from .phosim_cpu_pred import CpuPred
+
+
+__all__ = ['OpSimOrdering']
+
+class OpSimOrdering(object):
+    """
+    Code to split the Twinkles 3 obsHistIDs into sets that will be ordered so
+    that we would try to do Twinkles_3p1 first, followed by Twinkles_3p2,
+    followed by Twinkles_3p3
+    Parameters
+    ----------
+    opSimDBPath : absolute path to OpSim database
+    timeMax : float, unit of hours, default to 100.0
+        a threshold of time, such that any OpSim pointings with predictedPhoSim
+        times above that threshold will be dropped.
+
+    Attributes
+    ----------
+    distinctGroup : list
+        unique combination of variables in which the records are grouped. The
+        variables are 'night' and 'filter'
+    timeMax : float,
+        max value of `predictedPhoSimTimes` in hours for a record for it to be
+        used in the calculation
+    filteredOpSim : `pd.DataFrame`
+        dataFrame representing the OpSim data with duplicate records dropped in
+        favor of the ones with propID ==54 (WFD) and any record that has a
+        `predictedPhoSimTimes` > `self.timeMax` dropped
+    ignorePredictedTimes : Bool
+    cpuPred : instance of `sklearn.ensemble.forest.RandomForestRegressor`
+        obtained from a pickle file if `self.ignorePredictedTimes` is False
+    minimizeBy : parameter `minimizeBy`
+    """
+    def __init__(self, opSimDBPath,
+                 randomForestPickle=None,
+                 timeMax=100.0,
+                 ignorePredictedTimes=False,
+                 minimizeBy='predictedPhoSimTimes'):
+        """
+        Parameters
+        ----------
+        opSimDBPath : string, mandatory
+            absolute path to a sqlite OpSim database
+        randomForestPickle : string, defaults to None
+            absolute path to a pickle of an instance of
+            `sklearn.ensemble.forest.RandomForestRegressor`
+        timeMax: float, defaults to 120.0
+            max value of predicted PhoSim Run times of selected OpSim records.
+            Records with predicted PhoSIm run times beyond this value are
+            filtered out of `filteredOpSim`
+        ignorePredictedTimes : Bool, defaults to False
+            If True, ignores predicted PhoSim Run times, and therefore does not
+            require a `randomForestPickle`
+        minimizeBy : string, defaults to `predictedPhoSimTimes`
+            the column of `OpSim` which is minimized to select a single record
+            from all the members of a group having the same values of `self.distinctGroup`.
+            An example for such a parameter would be `expMJD` which is by definition unique
+            for every pointing and thus a minimization is easy
+        """
+        twinklesDir = getPackageDir('Twinkles')
+
+        self.ignorePredictedTimes = ignorePredictedTimes
+        self._opsimDF = self.fullOpSimDF(opSimDBPath)
+        self._opsimDF['year'] = self._opsimDF.night // 365
+
+        if randomForestPickle is None:
+            randomForestPickle = os.path.join(twinklesDir, 'data',
+                                              'RF_pickle.p')
+
+        if minimizeBy not in self._opsimDF.columns and minimizeBy != 'predictedPhoSimTimes':
+                raise NotImplementedError('minimizing by {} not implemented, try `expMJD`', minimizeBy)
+        self.minimizeBy = minimizeBy
+
+        # We don't need a pickle file if we an ignorePredictedTimes and have a minimize
+        predictionsNotRequired = self.ignorePredictedTimes and minimizeBy != 'predictedPhoSimTimes'  
+        if not predictionsNotRequired:
+            if not os.path.exists(randomForestPickle):
+                raise ValueError('pickle does not exist at {}'.format(randomForestPickle))
+            self.cpuPred = CpuPred(rf_pickle_file=randomForestPickle,
+                                   opsim_df=self._opsimDF,
+                                   fieldID=1427)
+            self._opsimDF['predictedPhoSimTimes'] = self.predictedTimes()
+
+        self.timeMax = timeMax
+        self.distinctGroup = ['night', 'filter']
+
+    def predictedTimes(self, obsHistIDs=None):
+        """
+        predicted time for `PhoSim` image sigmulation on a SLAC 'fell' CPU
+        in units of hours 
+
+        Parameters
+        ----------
+        obsHistIDs : float or sequence of integers, defaults to None
+            if None, obsHistIDs defaults to the sequence of obsHistIDs in
+            `self._opsimDF`
+        Returns
+        -------
+        `numpy.ndarray` of predicted PhoSim simulation times in hours
+        """
+        # default obsHistIDs
+        if obsHistIDs is None:
+            obsHistIDs = self._opsimDF.reset_index()['obsHistID'].values
+
+        obsHistIds = np.ravel(obsHistIDs)
+        times = np.ones_like(obsHistIds) * np.nan 
+        for i, obshistid in enumerate(obsHistIds):
+            times[i] = self.cpuPred(obshistid)
+
+        # convert to hours from seconds before return
+        return times / 3600.0
+
+    @property
+    def uniqueOpSimRecords(self):
+        """
+        - drop duplicates in favor of propID for WFD
+        """
+        pts = self._opsimDF.copy()
+        # Since the original SQL query ordered by propID, keep=first 
+        # preferentially chooses the propID for WFD
+        pts.drop_duplicates(subset='obsHistID', inplace=True, keep='first')
+        return pts
+
+    @property
+    def filteredOpSim(self):
+        """
+        dataframe dropping records from the unique set `self.uniqueOpSimRecords`
+        where the phoSim Runtime estimates exceeds threshold. If 
+        `self.ignorePredictedTimes` is set to `True`, then this simply returns
+        `self.uniqueOpSimRecords`
+        """
+        thresh = self.timeMax
+        if self.ignorePredictedTimes:
+            return self.uniqueOpSimRecords
+        else:
+            return self.uniqueOpSimRecords.query('predictedPhoSimTimes < @thresh')
+
+    @property
+    def opSimCols(self):
+        """
+        columns in `filteredOpSim`
+        """
+        return self.filteredOpSim.columns
+
+    @property
+    def obsHistIDsPredictedToTakeTooLong(self):
+        """
+        obsHistIDs dropped from Twink_3p1, Twink_3p2, Twink_3p3 because the
+        estimated phoSim run time is too long in the form a dataframe with
+        column headers `obsHistID` and `predictedPhoSimTimes`.
+
+        This returns None, if no obsHistIds are missing due to their
+        predictedPhoSimRunTime being too long
+        """
+        if self.ignorePredictedTimes:
+            return None
+        filteredObsHistID = \
+            tuple(self.filteredOpSim.reset_index().obsHistID.values.tolist())
+
+        missing = self.uniqueOpSimRecords.query('obsHistID not in @filteredObsHistID')
+        if len(missing) > 0:
+            return missing[['obsHistID', 'expMJD', 'predictedPhoSimTimes', 'filter', 'propID']]
+        else:
+            return None
+
+    @property
+    def Twinkles_WFD(self):
+        """
+        return a dataframe with all the visits for each unique combination with
+        the lowest propID (all WFD visits or all DDF visits) in each unique
+        combination
+        """
+        groupDistinct = self.filteredOpSim.groupby(self.distinctGroup)
+        gdf = groupDistinct[self.opSimCols].agg(dict(propID=min))
+        idx = gdf.propID.obsHistID.values 
+        df = self.filteredOpSim.set_index('obsHistID').ix[idx].sort_values(by='expMJD')
+        return df.reset_index()
+    
+    @property
+    def Twinkles_3p1(self):
+        """
+        for visits selected in Twinkles_WFD, pick the visit in each unique
+        combination with the lowest value of the `predictedPhoSimTimes`
+        """
+        groupDistinct = self.Twinkles_WFD.groupby(self.distinctGroup)
+
+        # The variable we are minimizing by
+        discVar = self.minimizeBy
+        gdf = groupDistinct[self.opSimCols].agg(dict(discVar=min))
+        idx = gdf.discVar.obsHistID.values 
+        df = self.filteredOpSim.set_index('obsHistID').ix[idx]
+        return df.sort_values(by='expMJD', inplace=False).reset_index()
+
+    @property
+    def Twinkles_3p1b(self):
+        """
+        dataframe containing those WFD visits that are part of `Twinkles_WFD` and not
+        covered in `self.Twinkles_3p1` (for example on nights when there are
+        multiple WFD visits in the same filter)
+        """
+        doneObsHist = tuple(self.Twinkles_3p1.obsHistID.values.tolist())
+        query = 'obsHistID not in @doneObsHist and propID == 54'
+        df = self.filteredOpSim.query(query).sort_values(by='expMJD',
+                                                         inplace=False)
+        return df
+                
+    @property
+    def Twinkles_3p2(self):
+        """
+        dr5 Observations that are in `filteredOpSim` and have not been done in
+        Twinkles_3p1
+        """
+        obs_1 = self.Twinkles_3p1.obsHistID.values.tolist()
+        obs_1b = self.Twinkles_3p1b.obsHistID.values.tolist()
+        doneObsHist = tuple(obs_1 + obs_1b)
+        query = 'year == 4 and obsHistID not in @doneObsHist'
+        return self.filteredOpSim.query(query).sort_values(by='expMJD',
+                                                           inplace=False)
+
+    @property
+    def Twinkles_3p3(self):
+        """
+        dataFrame of visit obsHistID for Run 3p3. These are DDF visits
+        that have `predictedPhoSimRunTime` smaller than `maxtime`, and
+        were not covered in either the set of unique visits covered in
+        Run 3.1 or the visits in a particular year covered as part of
+        3.2 
+        """
+        obs_1 = self.Twinkles_3p1.obsHistID.values.tolist()
+        obs_1b = self.Twinkles_3p1b.obsHistID.values.tolist()
+        obs_2 = self.Twinkles_3p2.obsHistID.values.tolist()
+        obs = tuple(obs_1 + obs_1b + obs_1b + obs_2)
+        query = 'obsHistID not in @obs'
+        return self.filteredOpSim.query(query).sort_values(by='expMJD',
+                                                           inplace=False)
+    @property
+    def Twinkles_3p4(self):
+        """
+        tuple of dataFrames for wfd and ddf visits for visits left out
+        of Run 3p1,2,3 due to high predicted phosim times, orderded by
+        predicted phosim run times.
+        """
+        leftovers = self.obsHistIDsPredictedToTakeTooLong
+        wfdvisits = leftovers.query('propID == 54')
+        wfdvisits.sort_values(by='expMJD', inplace=True)
+        ddfvisits = leftovers.query('propID == 56')
+        ddfvisits.sort_values(by='expMJD', inplace=True)
+        return wfdvisits, ddfvisits
+
+
+    @staticmethod
+    def fullOpSimDF(opsimdbpath,
+                    query="SELECT * FROM Summary WHERE FieldID == 1427 ORDER BY PROPID"):
+        engine = create_engine('sqlite:///' + opsimdbpath)
+        pts = pd.read_sql_query(query, engine)
+        return pts
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+#
+# Copyright (c) 2013, Digium, Inc.
+#
+
+"""Code for handling the base Swagger API model.
+"""
+
+import json
+import os
+import urllib
+import urlparse
+
+from swaggerpy.http_client import SynchronousHttpClient
+from swaggerpy.processors import SwaggerProcessor, SwaggerError
+
+SWAGGER_VERSIONS = ["1.1", "1.2"]
+
+SWAGGER_PRIMITIVES = [
+    'void',
+    'string',
+    'boolean',
+    'number',
+    'int',
+    'long',
+    'double',
+    'float',
+    'Date',
+]
+
+
+# noinspection PyDocstring
+class ValidationProcessor(SwaggerProcessor):
+    """A processor that validates the Swagger model.
+    """
+
+    def process_resource_listing(self, resources, context):
+        required_fields = ['basePath', 'apis', 'swaggerVersion']
+        validate_required_fields(resources, required_fields, context)
+
+        if not resources['swaggerVersion'] in SWAGGER_VERSIONS:
+            raise SwaggerError(
+                "Unsupported Swagger version %s" % resources.swaggerVersion,
+                context)
+
+    def process_resource_listing_api(self, resources, listing_api, context):
+        validate_required_fields(listing_api, ['path', 'description'], context)
+
+        if not listing_api['path'].startswith("/"):
+            raise SwaggerError("Path must start with /", context)
+
+    def process_api_declaration(self, resources, resource, context):
+        required_fields = [
+            'swaggerVersion', 'basePath', 'resourcePath', 'apis',
+            'models'
+        ]
+        validate_required_fields(resource, required_fields, context)
+        # Check model name and id consistency
+        for (model_name, model) in resource['models'].items():
+            if model_name != model['id']:
+                raise SwaggerError("Model id doesn't match name", context)
+                # Convert models dict to list
+
+    def process_resource_api(self, resources, resource, api, context):
+        required_fields = ['path', 'operations']
+        validate_required_fields(api, required_fields, context)
+
+    def process_operation(self, resources, resource, api, operation, context):
+        required_fields = ['httpMethod', 'nickname']
+        validate_required_fields(operation, required_fields, context)
+
+    def process_parameter(self, resources, resource, api, operation, parameter,
+                          context):
+        required_fields = ['name', 'paramType']
+        validate_required_fields(parameter, required_fields, context)
+        if parameter['paramType'] == 'path':
+            # special handling for path parameters
+            parameter['required'] = True
+            parameter['dataType'] = 'string'
+        else:
+            # dataType is required for non-path parameters
+            validate_required_fields(parameter, ['dataType'], context)
+        if 'allowedValues' in parameter:
+            raise SwaggerError(
+                "Field 'allowedValues' invalid; use 'allowableValues'",
+                context)
+
+    def process_error_response(self, resources, resource, api, operation,
+                               error_response, context):
+        required_fields = ['code', 'reason']
+        validate_required_fields(error_response, required_fields, context)
+
+    def process_model(self, resources, resource, model, context):
+        required_fields = ['id', 'properties']
+        validate_required_fields(model, required_fields, context)
+        # Move property field name into the object
+        for (prop_name, prop) in model['properties'].items():
+            prop['name'] = prop_name
+
+    def process_property(self, resources, resource, model, prop,
+                         context):
+        required_fields = ['type']
+        validate_required_fields(prop, required_fields, context)
+
+
+def json_load_url(http_client, url):
+    """Download and parse JSON from a URL.
+
+    :param http_client: HTTP client interface.
+    :type  http_client: http_client.HttpClient
+    :param url: URL for JSON to parse
+    :return: Parsed JSON dict
+    """
+    scheme = urlparse.urlparse(url).scheme
+    if scheme == 'file':
+        # requests can't handle file: URLs
+        fp = urllib.urlopen(url)
+        try:
+            return json.load(fp)
+        finally:
+            fp.close()
+    else:
+        resp = http_client.request('GET', url)
+        resp.raise_for_status()
+        return resp.json()
+
+
+class Loader(object):
+    """Abstraction for loading Swagger API's.
+
+    :param http_client: HTTP client interface.
+    :type  http_client: http_client.HttpClient
+    :param processors: List of processors to apply to the API.
+    :type  processors: list of SwaggerProcessor
+    """
+
+    def __init__(self, http_client, processors=None):
+        self.http_client = http_client
+        if processors is None:
+            processors = []
+            # always go through the validation processor first
+        # noinspection PyTypeChecker
+        self.processors = [ValidationProcessor()] + processors
+
+    def load_resource_listing(self, resources_url, base_url=None):
+        """Load a resource listing, loading referenced API declarations.
+
+        The following fields are added to the resource listing object model.
+         * ['url'] = URL resource listing was loaded from
+         * The ['apis'] array is modified according to load_api_declaration()
+
+        The Loader's processors are applied to the fully loaded resource
+        listing.
+
+        :param resources_url:   File name for resources.json
+        :param base_url:    Optional URL to be the base URL for finding API
+                            declarations. If not specified, 'basePath' from the
+                            resource listing is used.
+        """
+
+        # Load the resource listing
+        resource_listing = json_load_url(self.http_client, resources_url)
+
+        # Some extra data only known about at load time
+        resource_listing['url'] = resources_url
+        if not base_url:
+            base_url = resource_listing.get('basePath')
+
+        # Load the API declarations
+        for api in resource_listing.get('apis'):
+            self.load_api_declaration(base_url, api)
+
+        # Now that the raw object model has been loaded, apply the processors
+        self.process_resource_listing(resource_listing)
+        return resource_listing
+
+    def load_api_declaration(self, base_url, api_dict):
+        """Load an API declaration file.
+
+        api_dict is modified with the results of the load:
+         * ['url'] = URL api declaration was loaded from
+         * ['api_declaration'] = Parsed results of the load
+
+        :param base_url: Base URL to load from
+        :param api_dict: api object from resource listing.
+        """
+        path = api_dict.get('path').replace('{format}', 'json')
+        api_dict['url'] = urlparse.urljoin(base_url + '/', path.strip('/'))
+        api_dict['api_declaration'] = json_load_url(
+            self.http_client, api_dict['url'])
+
+    def process_resource_listing(self, resources):
+        """Apply processors to a resource listing.
+
+        :param resources: Resource listing to process.
+        """
+        for processor in self.processors:
+            processor.apply(resources)
+
+
+def validate_required_fields(json, required_fields, context):
+    """Checks a JSON object for a set of required fields.
+
+    If any required field is missing, a SwaggerError is raised.
+
+    :param json: JSON object to check.
+    :param required_fields: List of required fields.
+    :param context: Current context in the API.
+    """
+    missing_fields = [f for f in required_fields if not f in json]
+
+    if missing_fields:
+        raise SwaggerError(
+            "Missing fields: %s" % ', '.join(missing_fields), context)
+
+
+def load_file(resource_listing_file, http_client=None, processors=None):
+    """Loads a resource listing file, applying the given processors.
+
+    :param http_client: HTTP client interface.
+    :param resource_listing_file: File name for a resource listing.
+    :param processors:  List of SwaggerProcessors to apply to the resulting
+                        resource.
+    :return: Processed object model from
+    :raise: IOError: On error reading api-docs.
+    """
+    file_path = os.path.abspath(resource_listing_file)
+    url = urlparse.urljoin('file:', urllib.pathname2url(file_path))
+    # When loading from files, everything is relative to the resource listing
+    dir_path = os.path.dirname(file_path)
+    base_url = urlparse.urljoin('file:', urllib.pathname2url(dir_path))
+    return load_url(url, http_client=http_client, processors=processors,
+                    base_url=base_url)
+
+
+def load_url(resource_listing_url, http_client=None, processors=None,
+             base_url=None):
+    """Loads a resource listing, applying the given processors.
+
+    :param resource_listing_url: URL for a resource listing.
+    :param http_client: HTTP client interface.
+    :param processors:  List of SwaggerProcessors to apply to the resulting
+                        resource.
+    :param base_url:    Optional URL to be the base URL for finding API
+                        declarations. If not specified, 'basePath' from the
+                        resource listing is used.
+    :return: Processed object model from
+    :raise: IOError, URLError: On error reading api-docs.
+    """
+    if http_client is None:
+        http_client = SynchronousHttpClient()
+
+    loader = Loader(http_client=http_client, processors=processors)
+    return loader.load_resource_listing(
+        resource_listing_url, base_url=base_url)
+
+
+def load_json(resource_listing, http_client=None, processors=None):
+    """Process a resource listing that has already been parsed.
+
+    :param resource_listing: Parsed resource listing.
+    :type  resource_listing: dict
+    :param http_client:
+    :param processors:
+    :return: Processed resource listing.
+    """
+    if http_client is None:
+        http_client = SynchronousHttpClient()
+
+    loader = Loader(http_client=http_client, processors=processors)
+    loader.process_resource_listing(resource_listing)
+    return resource_listing
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+"""
+Code page 65001: Windows UTF-8 (CP_UTF8).
+"""
+
+import codecs
+import functools
+
+if not hasattr(codecs, 'code_page_encode'):
+    raise LookupError("cp65001 encoding is only available on Windows")
+
+### Codec APIs
+
+encode = functools.partial(codecs.code_page_encode, 65001)
+_decode = functools.partial(codecs.code_page_decode, 65001)
+
+def decode(input, errors='strict'):
+    return codecs.code_page_decode(65001, input, errors, True)
+
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def encode(self, input, final=False):
+        return encode(input, self.errors)[0]
+
+class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
+    _buffer_decode = _decode
+
+class StreamWriter(codecs.StreamWriter):
+    encode = encode
+
+class StreamReader(codecs.StreamReader):
+    decode = _decode
+
+### encodings module API
+
+def getregentry():
+    return codecs.CodecInfo(
+        name='cp65001',
+        encode=encode,
+        decode=decode,
+        incrementalencoder=IncrementalEncoder,
+        incrementaldecoder=IncrementalDecoder,
+        streamreader=StreamReader,
+        streamwriter=StreamWriter,
+    )
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Code based from these two awesome projects: 
+	- DPAPICK 	: https://bitbucket.org/jmichel/dpapick
+	- DPAPILAB 	: https://github.com/dfirfpi/dpapilab
+"""
+
+from structures import *
+from masterkey import *
+import hashlib
+import crypto
+
+class CredhistEntry():
+	def __init__(self, credhist):
+		self.ntlm 		= None
+		self.pwdhash 	= None
+		self.credhist 	= credhist
+	
+	def decrypt_with_hash(self, pwdhash):
+		"""
+		Decrypts this credhist entry with the given user's password hash.
+		Simply computes the encryption key with the given hash then calls self.decrypt_with_key() to finish the decryption.
+		"""
+		self.decrypt_with_key(crypto.derivePwdHash(pwdhash, self.credhist.SID))
+
+	def decrypt_with_key(self, enckey):
+		"""
+		Decrypts this credhist entry using the given encryption key.
+		"""
+		cleartxt 		= crypto.dataDecrypt(self.credhist.cipherAlgo, self.credhist.hashAlgo, self.credhist.encrypted, enckey, self.credhist.iv, self.credhist.rounds)
+		self.pwdhash 	= cleartxt[:self.credhist.shaHashLen]
+		self.ntlm 		= cleartxt[self.credhist.shaHashLen:self.credhist.shaHashLen + self.credhist.ntHashLen].rstrip("\x00")
+		if len(self.ntlm) != 16:
+			self.ntlm = None
+
+class CredHistFile():
+	def __init__(self, credhist):
+		self.credhistfile 	= CRED_HIST_FILE.parse(open(credhist, 'rb').read())
+		self.entries_list 	= []
+		self.valid 			= False
+		
+		# credhist is an optional field
+		if self.credhistfile.credhist:
+			for cred in self.credhistfile.credhist:
+				c = CredhistEntry(cred)
+				self.entries_list.append(c)
+
+	def decrypt_with_hash(self, pwdhash):
+		"""
+		Try to decrypt each entry with the given hash
+		"""
+
+		if self.valid:
+			return
+		
+		for entry in self.entries_list:
+			entry.decrypt_with_hash(pwdhash)
+
+	def decrypt_with_password(self, password):
+		"""
+		Decrypts this credhist entry with the given user's password.
+		Simply computes the password hash then calls self.decrypt_with_hash()
+		"""
+		self.decrypt_with_hash(hashlib.sha1(password.encode("UTF-16LE")).digest())
+
+Query: code to merge two files
+
+************************** NEXT RESULT **************************************
+"""
+Code for reading from Yahoo L6 data.
+
+The raw data is in XML format. These utils iterate through this data and
+return question-answer pairs. This provides a way to standardize access to the
+corpus.
+"""
+
+from __future__ import absolute_import
+from __future__ import print_function
+
+from gensim import models, corpora, similarities
+
+import cPickle as pkl
+import itertools
+import os
+import six
+import sys
+import re
+import xml.etree.cElementTree as ET
+import warnings
+
+from collections import Counter
+
+import numpy as np
+import logging
+
+# Constants.
+QUESTION_MAXLEN = 20
+ANSWER_MAXLEN = 100
+DICT_SIZE = 50000  # Maximum number of words to include in the corpus.
+DATA_ENV_NAME = 'YAHOO_DATA'  # Directory containing the Yahoo data, unzipped.
+YAHOO_L6_URL = 'http://webscope.sandbox.yahoo.com/catalog.php?datatype=l'
+
+# Variables that will be filled in later.
+BASE = os.path.dirname(os.path.realpath(__file__))
+DATA_PATH = os.path.join(BASE, 'data', 'FullOct2007.xml')
+DICTIONARY_FILE = os.path.join(BASE, 'data', 'dictionary_dict.pkl')
+EMBEDDINGS_FILE = os.path.join(BASE, 'data', 'word_embeddings.h5')
+
+if not os.path.exists(DATA_PATH):
+    warnings.warn('File not found: "%s". To create it from the existing '
+                  'files, run:  cat FullOct2007.xml.part1 '
+                  'FullOct2007.xml.part2 > FullOct2007.xml' % DATA_PATH)
+
+
+def word_tokenize(text):
+    """Tokenizes text (as a string) to a list of tokens."""
+
+    if text is None:
+        text = ''
+    elif not isinstance(text, six.string_types):
+        text = '' if text is None else text.text
+
+    text = re.sub('\<.+?\>', '', text).lower()
+    tokens = re.findall('[a-z]+|[0-9]+|\.\.\.|[?\.,!-\*;\"@#$%^&\(\)\\\/]', text)
+
+    return tokens
+
+
+if not os.path.exists(DICTIONARY_FILE):  # Creates the dictionary.
+    counter = Counter()
+    with open(DATA_PATH, 'r') as f:
+        parser = ET.iterparse(f)
+        num_docs = 0
+        for event, elem in parser:
+            if elem.tag == 'document':
+                num_docs += 1
+                words = (word_tokenize(elem.find('subject')) +
+                         word_tokenize(elem.find('content')) +
+                         word_tokenize(elem.find('bestanswer')))
+                counter.update(set(words))
+                elem.clear()
+
+            if num_docs % 1000 == 0:
+                sys.stdout.write('\rparsed %d docs, %d words'
+                                 % (num_docs, len(counter)))
+                sys.stdout.flush()
+
+            if num_docs == 1000000:
+                break
+
+    _DICTIONARY = [w for w, _ in counter.most_common(DICT_SIZE)]
+    with open(DICTIONARY_FILE, 'wb') as f:
+        pkl.dump(_DICTIONARY, f)
+else:
+    with open(DICTIONARY_FILE, 'rb') as f:
+        _DICTIONARY = pkl.load(f)
+
+# Extra tokens:
+# PADDING = 0
+OUT_OF_VOCAB = 0
+START_IDX = 1
+END_IDX = 2
+NUM_SPECIAL = 3 + ANSWER_MAXLEN  # OUT_OF_VOCAB, START_IDX, END_IDX
+
+_CHAR_TO_IDX = dict((c, i + NUM_SPECIAL) for i, c in enumerate(_DICTIONARY))
+NUM_TOKENS = NUM_SPECIAL + len(_DICTIONARY)
+
+
+def tokenize(question=None, answer=None, use_pad=False, include_rev=False):
+    """Converts text to tokens.
+
+    Args:
+        question: str or None, the question as a string.
+        answer: str or None, the answer as a string.
+        use_pad: bool, if set, pad to a specific length with end tokens.
+        include_rev: bool, if set, include the "reverse" dictionary.
+
+    Returns:
+        tok_questions: list of ints, the tokenized question.
+        tok_answers: list of ints, the tokenized answer.
+        question_len: int, the number of tokens in the question.
+        answer_len: int, the number of tokens in the answer.
+        if include_rev:
+            rev_dict: dictionary of int -> str pairs, for reversing from
+                the answer to the question.
+    """
+
+    if question is None:
+        question = ''
+
+    tok_questions = word_tokenize(question)[:QUESTION_MAXLEN-1]
+    tok_answers = word_tokenize(answer)[:ANSWER_MAXLEN-1]
+    del question, answer
+
+    idxs = dict((c, i + 3) for i, c in enumerate(tok_answers))
+
+    def _encode(w):
+        if w in _CHAR_TO_IDX:
+            return _CHAR_TO_IDX[w]
+        if w in idxs:
+            return idxs[w]
+        return OUT_OF_VOCAB
+
+    enc_questions = [_encode(w) for w in tok_questions] + [END_IDX]
+    enc_answers = [_encode(w) for w in tok_answers] + [END_IDX]
+    del tok_questions
+
+    question_len = len(enc_questions)
+    answer_len = len(enc_answers)
+
+    if use_pad:
+        enc_questions += [END_IDX] * (QUESTION_MAXLEN - len(enc_questions))
+        enc_answers += [END_IDX] * (ANSWER_MAXLEN - len(enc_answers))
+
+    if include_rev:
+        rev_dict = dict((i + 3, c) for i, c in enumerate(tok_answers))
+        del tok_answers
+        return enc_questions, enc_answers, question_len, answer_len, rev_dict
+    else:
+        del tok_answers
+        return enc_questions, enc_answers, question_len, answer_len
+
+
+def detokenize(tokens, rev_dict, argmax=False, show_missing=False):
+    """Converts question back to tokens.
+
+    Args:
+        tokens: list of ints, the tokens to be reversed.
+        rev_dict: the reverse dictionary (provided by the answer text).
+        argmax: bool, if set, take argmax over last dimension of tokens.
+        show_missing: bool, if set, use 'X' to represent missing tokens.
+    """
+
+    if argmax:
+        tokens = np.argmax(tokens, axis=-1)
+
+    def _decode(i):
+        if i >= NUM_SPECIAL:
+            return _DICTIONARY[i - NUM_SPECIAL]
+        elif i in rev_dict:
+            return '%s(%d)' % (rev_dict[i], i)
+        else:
+            return 'X(%d)' % i if show_missing else ''
+
+    words = [_decode(w) for w in tokens]
+    sentence = ' '.join(w for w in words if w)
+
+    return sentence
+
+
+def get_word_embeddings(num_dimensions=500,
+                        cache_loc=EMBEDDINGS_FILE):
+    """Generates word embeddings.
+
+    Args:
+        num_dimensions: int, number of embedding dimensions.
+        cache_loc: str, where to cache the word embeddings.
+
+    Returns:
+        numpy array representing the embeddings, with shape (NUM_TOKENS,
+            num_dimensions).
+    """
+
+    if os.path.exists(cache_loc):
+        embeddings = np.load(cache_loc)
+    else:
+        class SentenceGenerator(object):
+            def __iter__(self):
+                iterable = itertools.islice(iterate_qa_pairs(), 1000000)
+                for i, (question, answer) in enumerate(iterable, 1):
+                    q, a, _, _ = tokenize(question=question, answer=answer,
+                                          use_pad=False, include_rev=False)
+                    yield [str(w) for w in q]
+                    yield [str(w) for w in a]
+
+                    del q, a, w
+
+                    if i % 1000 == 0:
+                        sys.stderr.write('\rprocessed %d' % i)
+                        sys.stderr.flush()
+
+                sys.stderr.write('\rprocessed %d\n' % i)
+                sys.stderr.flush()
+
+        # The default embeddings.
+        embeddings = np.random.normal(size=(NUM_TOKENS, num_dimensions))
+
+        sentences = SentenceGenerator()
+        model = models.Word2Vec(sentences, size=num_dimensions)
+
+        word_vectors = model.wv
+        del model
+
+        # Puts the Word2Vec weights into the right order.
+        weights = word_vectors.syn0
+        vocab = word_vectors.vocab
+        for k, v in vocab.items():
+            embeddings[int(k)] = weights[v.index]
+
+        with open(cache_loc, 'wb') as f:
+            np.save(f, embeddings)
+            pass
+
+    assert embeddings.shape == (NUM_TOKENS, num_dimensions)
+    return embeddings
+
+
+def iterate_qa_pairs(num_iter=None):
+    """Iterates through question-answer pairs in a single file.
+
+    Args:
+        num_iter: int (default: None), number of times to iterate. If None,
+            iterates infinitely.
+
+    Yields:
+        subject: the question title (max length = QUESTION_TITLE_MAXLEN)
+        bestanswer: the body of the best answer
+            (max length = ANSWER_MAXLEN)
+    """
+
+    def _parse_document(elem):
+        subject = elem.find('subject')
+        bestanswer = elem.find('bestanswer')
+
+        return ('' if subject is None else subject.text,
+                '' if bestanswer is None else bestanswer.text)
+
+    if num_iter is None:
+        iterator = itertools.count()
+    else:
+        iterator = xrange(num_iter)
+
+    for _ in iterator:
+        with open(DATA_PATH, 'r') as f:
+            parser = ET.iterparse(f)
+            for event, elem in parser:
+                if elem.tag == 'document':
+                    yield _parse_document(elem)
+                    elem.clear()  # Important for avoiding memory issues.
+
+
+def iterate_answer_to_question(batch_size, include_ref, num_iter=None):
+    """Yields Numpy arrays, representing the data."""
+
+    q_toks, a_toks, q_lens, a_lens, refs = [], [], [], [], []
+
+    for i, (question, answer) in enumerate(iterate_qa_pairs(num_iter), 1):
+        args = tokenize(
+            question=question, answer=answer,
+            use_pad=True, include_rev=include_ref)
+
+        q_toks.append(args[0])
+        a_toks.append(args[1])
+        q_lens.append(args[2])
+        a_lens.append(args[3])
+
+        if include_ref:
+            refs.append(args[4])
+
+        if i % batch_size == 0:
+            r = [np.asarray(q_toks), np.asarray(a_toks),
+                 np.asarray(q_lens), np.asarray(a_lens)]
+
+            if include_ref:
+                r.append(refs)
+
+            yield r
+
+            q_toks, a_toks, q_lens, a_lens, refs = [], [], [], [], []
+
+
+if __name__ == '__main__':  # Scropt for building the embeddings.
+    emb = get_word_embeddings()
+    print('emb:', emb.shape)
+

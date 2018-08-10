@@ -1,3 +1,5 @@
+Query: function that calculates distance
+
 ************************** NEXT RESULT **************************************
 # function for doing a morph between two sounds using the stft
 
@@ -96,6 +98,8 @@ def main(inputFile1='../../sounds/ocean.wav', inputFile2='../../sounds/speech-ma
 if __name__ == '__main__':
 	main()
 
+Query: function that calculates distance
+
 ************************** NEXT RESULT **************************************
 #Author: OMKAR PATHAK
 #Program to convert decimal to its equivalent binary
@@ -110,6 +114,8 @@ if __name__ == '__main__':
     userInput = int(input('Enter the decimal number to find its binary equivalent: '))
     decimalToBinary(userInput)
     print()
+
+Query: function that calculates distance
 
 ************************** NEXT RESULT **************************************
 # -*- coding: utf-8 -*-
@@ -216,6 +222,8 @@ loop = asyncio.get_event_loop()
 loop.run_until_complete(fuck_init(loop))
 loop.run_forever()
 
+Query: function that calculates distance
+
 ************************** NEXT RESULT **************************************
 def func1(param1):
     """Function 1
@@ -241,6 +249,8 @@ def func2(param1, param2):
     pass
 
 
+
+Query: function that calculates distance
 
 ************************** NEXT RESULT **************************************
 #!/usr/bin/env python
@@ -333,6 +343,8 @@ def main():
 if __name__ == '__main__':
     main()
 
+Query: function that calculates distance
+
 ************************** NEXT RESULT **************************************
 def func1(param1):
     """Function 1
@@ -365,6 +377,8 @@ def func2(param1, param2):
     pass
 
 
+
+Query: function that calculates distance
 
 ************************** NEXT RESULT **************************************
 #!/usr/bin/python
@@ -470,6 +484,8 @@ def generate_user_config(original_sk_user_config, require_sk_user_config,
 
     dst.write('\n#endif // ' + BUILD_GUARD + '\n')
 
+Query: function that calculates distance
+
 ************************** NEXT RESULT **************************************
 """
 *********************
@@ -554,6 +570,8 @@ rrate, fkpp = sr.retrRXN(duprxn)
 fr.cmbnRATES(rrate)
 # Rewrite refined mechanism
 fh.wrtKPP(rrate,fkpp)
+
+Query: function that calculates distance
 
 ************************** NEXT RESULT **************************************
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
@@ -640,6 +658,8 @@ def main(args=None):
     args = parser.parse_args(args)
 
     sum_fspec(args.files, args.outname)
+
+Query: function that calculates distance
 
 ************************** NEXT RESULT **************************************
 # -*- coding: utf-8 -*-

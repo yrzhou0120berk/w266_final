@@ -1,0 +1,1681 @@
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+'''
+syntax test
+Runs various .kll files through the compiler to make sure that they are processed without unexpected errors
+'''
+
+### Imports ##
+
+import pytest
+from tests.klltest import kll_run, header_test
+
+
+
+### Variables ###
+
+test_files = [
+    'kll/examples/assignment.kll',
+    'kll/examples/capabilitiesExample.kll',
+    'kll/examples/colemak.kll',
+    'kll/examples/defaultMapExample.kll',
+    'kll/examples/example.kll',
+    'kll/examples/hhkbpro2.kll',
+    'kll/examples/leds.kll',
+    'kll/examples/mapping.kll',
+    'kll/examples/md1Map.kll',
+    'kll/examples/simple1.kll',
+    'kll/examples/simple2.kll',
+    'kll/examples/simpleExample.kll',
+    'kll/examples/state_scheduling.kll',
+    'kll/layouts/mouseTest.kll',
+    'kll/layouts/klltest.kll',
+    'kll/examples/triggers.kll',
+]
+
+
+
+### Tests ###
+
+@pytest.mark.parametrize('input_file', test_files)
+def test_syntax(input_file):
+    '''
+    Runs syntax test on each of the specified files
+    '''
+    args = ['--emitter', 'none', '--data-finalization-display', input_file]
+    header_test(input_file, args)
+    ret = kll_run(args)
+    assert ret == 0
+
+@pytest.mark.parametrize('input_file', test_files)
+def test_syntax_token_debug(input_file):
+    '''
+    Runs syntax test on each of the specified files, including --parser-token-debug
+    '''
+    args = ['--emitter', 'none', '--data-finalization-display', '--parser-token-debug', input_file]
+    header_test(input_file, args)
+    ret = kll_run(args)
+    assert ret == 0
+
+@pytest.mark.parametrize('input_file', test_files)
+def test_syntax_operation_debug(input_file):
+    '''
+    Runs syntax test on each of the specified files, including --operation-organization-display
+    '''
+    args = ['--emitter', 'none', '--data-finalization-display', '--operation-organization-display', input_file]
+    header_test(input_file, args)
+    ret = kll_run(args)
+    assert ret == 0
+
+@pytest.mark.parametrize('input_file', test_files)
+def test_syntax_fail_debug(input_file):
+    '''
+    Runs syntax test on each of the specified files, including failure debug options
+    '''
+    args = ['--emitter', 'none', '--token-debug', '--parser-token-debug', '--operation-organization-display', '--data-organization-display', '--data-finalization-display', input_file]
+    header_test(input_file, args)
+    ret = kll_run(args)
+    assert ret == 0
+
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+#     Copyright 2018, Kay Hayen, mailto:kay.hayen@gmail.com
+#
+#     Part of "Nuitka", an optimizing Python compiler that is compatible and
+#     integrates with CPython, but also works on its own.
+#
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
+#
+""" Syntax highlighting for Python.
+
+Inspired/copied from by http://diotavelli.net/PyQtWiki/Python%20syntax%20highlighting
+"""
+
+from PyQt5.QtCore import (
+    QRegExp  # @UnresolvedImport pylint: disable=I0021,import-error
+)
+from PyQt5.QtGui import (
+    QColor  # @UnresolvedImport pylint: disable=I0021,import-error
+)
+from PyQt5.QtGui import (
+    QFont  # @UnresolvedImport pylint: disable=I0021,import-error
+)
+from PyQt5.QtGui import (
+    QSyntaxHighlighter  # @UnresolvedImport pylint: disable=I0021,import-error
+)
+from PyQt5.QtGui import (
+    QTextCharFormat  # @UnresolvedImport pylint: disable=I0021,import-error
+)
+
+
+def createTextFormat(color, style = ""):
+    """Return a QTextCharFormat with the given attributes.
+    """
+    _color = QColor()
+    _color.setNamedColor(color)
+
+    _format = QTextCharFormat()
+    _format.setForeground(_color)
+    if "bold" in style:
+        _format.setFontWeight(QFont.Bold)
+    if "italic" in style:
+        _format.setFontItalic(True)
+
+    return _format
+
+
+# Syntax styles that can be shared by all languages
+STYLES = {
+    "keyword"  : createTextFormat("blue"),
+    "operator" : createTextFormat("red"),
+    "brace"    : createTextFormat("darkGray"),
+    "defclass" : createTextFormat("black", "bold"),
+    "string"   : createTextFormat("magenta"),
+    "string2"  : createTextFormat("darkMagenta"),
+    "comment"  : createTextFormat("darkGreen", "italic"),
+    "self"     : createTextFormat("black", "italic"),
+    "numbers"  : createTextFormat("brown"),
+}
+
+
+class PythonHighlighter(QSyntaxHighlighter):
+    """ Syntax highlighter for the Python language.
+    """
+    # Python keywords
+    keywords = [
+        "and", "assert", "break", "class", "continue", "def",
+        "del", "elif", "else", "except", "exec", "finally",
+        "for", "from", "global", "if", "import", "in",
+        "is", "lambda", "not", "or", "pass", "print",
+        "raise", "return", "try", "while", "with", "yield",
+        "None", "True", "False",
+    ]
+
+    # Python operators
+    operators = [
+        '=',
+        # Comparison
+        "==", "!=", '<', "<=", '>', ">=",
+        # Arithmetic
+        "\+", '-', "\*", '/', "//", "\%", "\*\*",
+        # In-place
+        "\+=", "-=", "\*=", "/=", "\%=",
+        # Bitwise
+        "\^", "\|", "\&", "\~", ">>", "<<",
+    ]
+
+    # Python braces
+    braces = [
+        "\{", "\}", "\(", "\)", "\[", "\]",
+    ]
+    def __init__(self, document):
+        QSyntaxHighlighter.__init__(self, document)
+
+        # Multi-line strings (expression, flag, style)
+        # The triple-quotes in these two lines will mess up the
+        # syntax highlighting from this point onward
+        self.tri_single = (QRegExp("'''"), 1, STYLES["string2"])
+        self.tri_double = (QRegExp('"""'), 2, STYLES["string2"])
+
+        rules = []
+
+        # Keyword, operator, and brace rules
+        rules += [(r'\b%s\b' % w, 0, STYLES["keyword"])
+            for w in PythonHighlighter.keywords]
+        rules += [(r'%s' % o, 0, STYLES["operator"])
+            for o in PythonHighlighter.operators]
+        rules += [(r'%s' % b, 0, STYLES["brace"])
+            for b in PythonHighlighter.braces]
+
+        # All other rules
+        rules += [
+            # 'self'
+            (r'\bself\b', 0, STYLES["self"]),
+
+            # Double-quoted string, possibly containing escape sequences
+            (r'"[^"\\]*(\\.[^"\\]*)*"', 0, STYLES["string"]),
+            # Single-quoted string, possibly containing escape sequences
+            (r"'[^'\\]*(\\.[^'\\]*)*'", 0, STYLES["string"]),
+
+            # 'def' followed by an identifier
+            (r'\bdef\b\s*(\w+)', 1, STYLES["defclass"]),
+            # 'class' followed by an identifier
+            (r'\bclass\b\s*(\w+)', 1, STYLES["defclass"]),
+
+            # From '#' until a newline
+            (r'#[^\n]*', 0, STYLES["comment"]),
+
+            # Numeric literals
+            (r'\b[+-]?[0-9]+[lL]?\b', 0, STYLES["numbers"]),
+            (r'\b[+-]?0[xX][0-9A-Fa-f]+[lL]?\b', 0, STYLES["numbers"]),
+            (r'\b[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b', 0, STYLES["numbers"]),
+        ]
+
+        # Build a QRegExp for each pattern
+        self.rules = [(QRegExp(pat), index, fmt)
+            for (pat, index, fmt) in rules]
+
+
+    def highlightBlock(self, text):
+        """Apply syntax highlighting to the given block of text.
+        """
+        # Do other syntax formatting
+        for expression, nth, display_format in self.rules:
+            index = expression.indexIn(text, 0)
+
+            while index >= 0:
+                # We actually want the index of the nth match
+                index = expression.pos(nth)
+                length = expression.cap(nth).length()
+                self.setFormat(index, length, display_format)
+                index = expression.indexIn(text, index + length)
+
+        self.setCurrentBlockState(0)
+
+        # Do multi-line strings
+        in_multiline = self.match_multiline(text, *self.tri_single)
+        if not in_multiline:
+            in_multiline = self.match_multiline(text, *self.tri_double)
+
+
+    def match_multiline(self, text, delimiter, in_state, style):
+        """Do highlighting of multi-line strings. ``delimiter`` should be a
+        ``QRegExp`` for triple-single-quotes or triple-double-quotes, and
+        ``in_state`` should be a unique integer to represent the corresponding
+        state changes when inside those strings. Returns True if we're still
+        inside a multi-line string when this function is finished.
+        """
+        # If inside triple-single quotes, start at 0
+        if self.previousBlockState() == in_state:
+            start = 0
+            add = 0
+        # Otherwise, look for the delimiter on this line
+        else:
+            start = delimiter.indexIn(text)
+            # Move past this match
+            add = delimiter.matchedLength()
+
+        # As long as there's a delimiter match on this line...
+        while start >= 0:
+            # Look for the ending delimiter
+            end = delimiter.indexIn(text, start + add)
+            # Ending delimiter on this line?
+            if end >= add:
+                length = end - start + add + delimiter.matchedLength()
+                self.setCurrentBlockState(0)
+            # No; multi-line string
+            else:
+                self.setCurrentBlockState(in_state)
+                length = text.length() - start + add
+            # Apply formatting
+            self.setFormat(start, length, style)
+            # Look for the next match
+            start = delimiter.indexIn(text, start + length)
+
+        # Return True if still inside a multi-line string, False otherwise
+        if self.currentBlockState() == in_state:
+            return True
+        else:
+            return False
+
+def addPythonHighlighter(document):
+    PythonHighlighter(document)
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import time
+
+import numpy as np
+import tensorflow as tf
+from six.moves import range
+
+from reinforceflow.agents.agent import BaseAgent
+from reinforceflow.core import losses, Continuous, Tuple
+from reinforceflow.core.optimizer import Optimizer, RMSProp
+from reinforceflow.core.policy import GreedyPolicy
+from reinforceflow.utils import tensor_utils, utils
+
+
+class ActorCritic(BaseAgent):
+    def __init__(self, env, model, use_double=True, restore_from=None, device='/gpu:0',
+                 optimizer=None, additional_losses=set(), trajectory_batch=True,
+                 trainable_weights=None, saver_keep=3, name='ActorCritic'):
+        """Constructs Deep Q-Learning agent.
+         Includes the following implementations:
+            1. Human-level control through deep reinforcement learning, Mnih et al., 2015.
+            2. Dueling Network Architectures for Deep Reinforcement Learning, Wang et al., 2015.
+                See `models.DeepQModel`.
+            3. Deep Reinforcement Learning with Double Q-learning, Hasselt et al., 2016.
+                See `use_double` argument.
+            4. Prioritized Experience Replay, Schaul et al., 2015.
+                See `core.replay.ProportionalReplay`.
+
+        See `core.BaseDeepQ`.
+        Args:
+            env (gym.Env): Environment instance.
+            model (models.AbstractFactory): Network factory.
+            use_double (bool): Enables Double DQN.
+            restore_from (str): Path to the pre-trained model.
+            device (str): TensorFlow device, used for graph creation.
+            optimizer (str or Optimizer): Agent's optimizer.
+                By default: RMSProp(lr=2.5e-4, momentum=0.95).
+            additional_losses (set): Set of additional losses.
+            trainable_weights (list): List of trainable weights.
+                Network architecture must be exactly the same as provided for this agent.
+                If provided, current agent weights will remain constant.
+                Pass None, to optimize current agent network.
+            saver_keep (int): Maximum number of checkpoints can be stored at once.
+        """
+        super(ActorCritic, self).__init__(env=env, model=model, device=device,
+                                          saver_keep=saver_keep, name=name)
+        self.use_double = use_double
+        self.trajectory_batch = trajectory_batch
+
+        if isinstance(self.env.action_space, Continuous):
+            raise ValueError('%s does not support environments with continuous '
+                             'action space.' % self.__class__.__name__)
+        if isinstance(self.env.action_space, Tuple):
+            raise ValueError('%s does not support environments with multiple '
+                             'action spaces.' % self.__class__.__name__)
+
+        self._last_log_time = time.time()
+        self._last_target_sync = self.step
+
+        with tf.device(self.device):
+            self.terms = tf.placeholder('bool', [None], name='term')
+            self.traj_ends = tf.placeholder('bool', [None], name='trajectory')
+            self.gamma = tf.placeholder('float32', [], name='gamma')
+            self.obs_next = tf.placeholder('float32',
+                                           shape=[None] + list(self.env.observation_space.shape),
+                                           name='obs_next')
+
+            with tf.variable_scope(self._scope + 'optimizer'):
+                bootstrap_idx = tf.logical_xor(self.traj_ends, self.terms)
+                obs_next = tf.cond(tf.greater(tf.reduce_sum(tf.cast(bootstrap_idx, 'int32')), 0),
+                                   lambda: tf.boolean_mask(self.obs_next, bootstrap_idx),
+                                   lambda: self.obs_next)
+
+            with tf.variable_scope(self._scope + 'network', reuse=True):
+                self.ev_net = self.model.build_from_inputs(inputs=obs_next,
+                                                           output_space=self.env.action_space)
+
+            with tf.variable_scope(self._scope + 'optimizer'):
+                discount = tensor_utils.discount_trajectory_op(self.rewards,
+                                                               self.terms,
+                                                               self.traj_ends,
+                                                               self.gamma,
+                                                               self.ev_net['value'])
+                compositor = losses.LossCompositor()
+                compositor.add(losses.PolicyGradientLoss(coef=1.0))
+                compositor.add(losses.EntropyLoss(coef=-0.01))
+                compositor.add(losses.TDLoss(coef=1.0))
+                compositor.add(additional_losses)
+                loss = compositor.loss(endpoints=self.net,
+                                       action=self.actions,
+                                       reward=discount,
+                                       term=self.terms)
+                if optimizer is None:
+                    self.opt = RMSProp(7e-4, decay=0.99, epsilon=0.1)
+                self.opt = Optimizer.create(optimizer, self.global_step)
+                trainable_weights = self.weights if trainable_weights is None else trainable_weights
+
+                grads = self.opt.gradients(loss, self.weights)
+                self._train_op = {'value': self.net['value'],
+                                  'target': discount,
+                                  'loss': loss,
+                                  'minimize': self.opt.apply_gradients(grads, trainable_weights)}
+
+        with tf.variable_scope(self._scope) as sc:
+            tensor_utils.add_observation_summary(self.net['input'], self.env)
+            tf.summary.histogram('agent/action', self.actions)
+            tf.summary.scalar('agent/learning_rate', self.opt.lr_ph)
+            tf.summary.scalar('metrics/loss', loss)
+            tf.summary.scalar('metrics/avg_Q', tf.reduce_mean(self.ev_net['value']))
+            tf.summary.scalar('value', tf.reduce_mean(self.net['value']))
+            tf.summary.scalar('lr', self.opt.lr_ph)
+            tf.summary.scalar('loss', loss)
+            self._summary_op = tf.summary.merge(tf.get_collection(tf.GraphKeys.SUMMARIES, sc.name))
+        self.sess.run(tf.global_variables_initializer())
+        if restore_from and tf.train.latest_checkpoint(restore_from):
+            self.load_weights(restore_from)
+
+    def predict_on_batch(self, obs_batch):
+        """Computes action-values for given batch of observations."""
+        return self.sess.run(self.net['policy'], {self.net['input']: obs_batch})
+
+    def act(self, obs):
+        """Computes action with maximum probability."""
+        action_probs = self.predict_on_batch([obs])
+        return GreedyPolicy.select_action(self.env, action_probs)
+
+    def explore(self, obs, step=0):
+        """Computes action with given exploration policy for given observation."""
+        action_probs = self.predict_on_batch([obs])
+        act = np.random.choice(range(len(action_probs[0])), p=action_probs[0])
+        return utils.onehot(act, self.env.action_space.shape)
+
+    def train_on_batch(self, obs, actions, rewards, term, obs_next, traj_ends,
+                       lr, gamma=0.99, summarize=False, importance=None):
+        self._train_op['summary'] = self._summary_op if summarize else self._no_op
+        return self.sess.run(self._train_op, {self.net['input']: obs,
+                                              self.actions: actions,
+                                              self.rewards: rewards,
+                                              self.terms: term,
+                                              self.obs_next: obs_next,
+                                              self.traj_ends: traj_ends,
+                                              self.opt.lr_ph: lr,
+                                              self.gamma: gamma
+                                              })
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+# Copyright (C) 2009 Stijn Cole
+# Copyright (C) 2010-2011 Richard Lincoln
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from numpy import zeros
+from scipy.sparse.linalg import splu
+
+from pypower.makeYbus import makeYbus
+
+def AugYbus(baseMVA, bus, branch, xd_tr, gbus, P, Q, U0):
+    """ Constructs augmented bus admittance matrix Ybus.
+
+    @param baseMVA: power base
+    @param bus: bus data
+    @param branch: branch data
+    @param xd_tr: d component of transient reactance
+    @param gbus: generator buses
+    @param P: load active power
+    @param Q: load reactive power
+    @param U0: steady-state bus voltages
+    @return: factorised augmented bus admittance matrix
+
+    @see: U{http://www.esat.kuleuven.be/electa/teaching/matdyn/}
+    """
+    # Calculate bus admittance matrix
+    Ybus, _, _ = makeYbus(baseMVA, bus, branch)
+
+    # Calculate equivalent load admittance
+    yload = (P - 1j * Q) / (abs(U0)**2)
+
+    # Calculate equivalent generator admittance
+    ygen = zeros(Ybus.shape[0])
+    ygen[gbus] = 1 / (1j * xd_tr)
+
+    # Add equivalent load and generator admittance to Ybus matrix
+    for i in range(Ybus.shape[0]):
+        Ybus[i, i] = Ybus[i, i] + ygen[i] + yload[i]
+
+    # Factorise
+    return splu(Ybus)
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import functools
+import os
+import os.path
+import shutil
+
+import tensorflow as tf
+
+from tensorflow.tensorboard.backend.event_processing import event_accumulator
+from tensorflow.tensorboard.backend.event_processing import event_multiplexer
+
+
+def _AddEvents(path):
+  if not tf.gfile.IsDirectory(path):
+    tf.gfile.MakeDirs(path)
+  fpath = os.path.join(path, 'hypothetical.tfevents.out')
+  with tf.gfile.GFile(fpath, 'w') as f:
+    f.write('')
+    return fpath
+
+
+def _CreateCleanDirectory(path):
+  if tf.gfile.IsDirectory(path):
+    tf.gfile.DeleteRecursively(path)
+  tf.gfile.MkDir(path)
+
+
+class _FakeAccumulator(object):
+
+  def __init__(self, path, health_pill_mapping=None):
+    """Constructs a fake accumulator with some fake events.
+
+    Args:
+      path: The path for the run that this accumulator is for.
+      health_pill_mapping: An optional mapping from Op to health pill strings.
+    """
+    self._path = path
+    self.reload_called = False
+    self._node_names_to_health_pills = health_pill_mapping or {}
+
+  def Tags(self):
+    return {event_accumulator.IMAGES: ['im1', 'im2'],
+            event_accumulator.AUDIO: ['snd1', 'snd2'],
+            event_accumulator.HISTOGRAMS: ['hst1', 'hst2'],
+            event_accumulator.COMPRESSED_HISTOGRAMS: ['cmphst1', 'cmphst2'],
+            event_accumulator.SCALARS: ['sv1', 'sv2']}
+
+  def FirstEventTimestamp(self):
+    return 0
+
+  def _TagHelper(self, tag_name, enum):
+    if tag_name not in self.Tags()[enum]:
+      raise KeyError
+    return ['%s/%s' % (self._path, tag_name)]
+
+  def Scalars(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.SCALARS)
+
+  def HealthPills(self, node_name):
+    if node_name not in self._node_names_to_health_pills:
+      raise KeyError
+    health_pills = self._node_names_to_health_pills[node_name]
+    return [self._path + '/' + health_pill for health_pill in health_pills]
+
+  def GetOpsWithHealthPills(self):
+    return self._node_names_to_health_pills.keys()
+
+  def Histograms(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.HISTOGRAMS)
+
+  def CompressedHistograms(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.COMPRESSED_HISTOGRAMS)
+
+  def Images(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.IMAGES)
+
+  def Audio(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.AUDIO)
+
+  def Tensors(self, tag_name):
+    return self._TagHelper(tag_name, event_accumulator.TENSORS)
+
+  def Reload(self):
+    self.reload_called = True
+
+
+def _GetFakeAccumulator(path,
+                        size_guidance=None,
+                        compression_bps=None,
+                        purge_orphaned_data=None,
+                        health_pill_mapping=None):
+  del size_guidance, compression_bps, purge_orphaned_data  # Unused.
+  return _FakeAccumulator(path, health_pill_mapping=health_pill_mapping)
+
+
+class EventMultiplexerTest(tf.test.TestCase):
+
+  def setUp(self):
+    super(EventMultiplexerTest, self).setUp()
+    self.stubs = tf.test.StubOutForTesting()
+
+    self.stubs.Set(event_accumulator, 'EventAccumulator', _GetFakeAccumulator)
+
+  def tearDown(self):
+    self.stubs.CleanUp()
+
+  def testEmptyLoader(self):
+    """Tests empty EventMultiplexer creation."""
+    x = event_multiplexer.EventMultiplexer()
+    self.assertEqual(x.Runs(), {})
+
+  def testRunNamesRespected(self):
+    """Tests two EventAccumulators inserted/accessed in EventMultiplexer."""
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertItemsEqual(sorted(x.Runs().keys()), ['run1', 'run2'])
+    self.assertEqual(x._GetAccumulator('run1')._path, 'path1')
+    self.assertEqual(x._GetAccumulator('run2')._path, 'path2')
+
+  def testReload(self):
+    """EventAccumulators should Reload after EventMultiplexer call it."""
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertFalse(x._GetAccumulator('run1').reload_called)
+    self.assertFalse(x._GetAccumulator('run2').reload_called)
+    x.Reload()
+    self.assertTrue(x._GetAccumulator('run1').reload_called)
+    self.assertTrue(x._GetAccumulator('run2').reload_called)
+
+  def testScalars(self):
+    """Tests Scalars function returns suitable values."""
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+
+    run1_actual = x.Scalars('run1', 'sv1')
+    run1_expected = ['path1/sv1']
+
+    self.assertEqual(run1_expected, run1_actual)
+
+  def testHealthPills(self):
+    """Tests HealthPills() returns events associated with run1/Add."""
+    self.stubs.Set(event_accumulator, 'EventAccumulator',
+                   functools.partial(
+                       _GetFakeAccumulator,
+                       health_pill_mapping={'Add': ['hp1', 'hp2']}))
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertEqual(['path1/hp1', 'path1/hp2'], x.HealthPills('run1', 'Add'))
+
+  def testGetOpsWithHealthPillsWhenHealthPillsAreNotAvailable(self):
+    # The event accumulator lacks health pills for the run.
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertItemsEqual([], x.GetOpsWithHealthPills('run1'))
+
+  def testGetOpsWithHealthPillsWhenHealthPillsAreAvailable(self):
+    # The event accumulator has health pills for the run.
+    self.stubs.Set(event_accumulator, 'EventAccumulator',
+                   functools.partial(
+                       _GetFakeAccumulator,
+                       health_pill_mapping={'Add': ['hp1', 'hp2']}))
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertItemsEqual(['Add'], x.GetOpsWithHealthPills('run1'))
+
+  def testExceptions(self):
+    """KeyError should be raised when accessing non-existing keys."""
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    with self.assertRaises(KeyError):
+      x.Scalars('sv1', 'xxx')
+
+  def testInitialization(self):
+    """Tests EventMultiplexer is created properly with its params."""
+    x = event_multiplexer.EventMultiplexer()
+    self.assertEqual(x.Runs(), {})
+    x = event_multiplexer.EventMultiplexer({'run1': 'path1', 'run2': 'path2'})
+    self.assertItemsEqual(x.Runs(), ['run1', 'run2'])
+    self.assertEqual(x._GetAccumulator('run1')._path, 'path1')
+    self.assertEqual(x._GetAccumulator('run2')._path, 'path2')
+
+  def testAddRunsFromDirectory(self):
+    """Tests AddRunsFromDirectory function.
+
+    Tests the following scenarios:
+    - When the directory does not exist.
+    - When the directory is empty.
+    - When the directory has empty subdirectory.
+    - Contains proper EventAccumulators after adding events.
+    """
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+    join = os.path.join
+    fakedir = join(tmpdir, 'fake_accumulator_directory')
+    realdir = join(tmpdir, 'real_accumulator_directory')
+    self.assertEqual(x.Runs(), {})
+    x.AddRunsFromDirectory(fakedir)
+    self.assertEqual(x.Runs(), {}, 'loading fakedir had no effect')
+
+    _CreateCleanDirectory(realdir)
+    x.AddRunsFromDirectory(realdir)
+    self.assertEqual(x.Runs(), {}, 'loading empty directory had no effect')
+
+    path1 = join(realdir, 'path1')
+    tf.gfile.MkDir(path1)
+    x.AddRunsFromDirectory(realdir)
+    self.assertEqual(x.Runs(), {}, 'creating empty subdirectory had no effect')
+
+    _AddEvents(path1)
+    x.AddRunsFromDirectory(realdir)
+    self.assertItemsEqual(x.Runs(), ['path1'], 'loaded run: path1')
+    loader1 = x._GetAccumulator('path1')
+    self.assertEqual(loader1._path, path1, 'has the correct path')
+
+    path2 = join(realdir, 'path2')
+    _AddEvents(path2)
+    x.AddRunsFromDirectory(realdir)
+    self.assertItemsEqual(x.Runs(), ['path1', 'path2'])
+    self.assertEqual(
+        x._GetAccumulator('path1'), loader1, 'loader1 not regenerated')
+
+    path2_2 = join(path2, 'path2')
+    _AddEvents(path2_2)
+    x.AddRunsFromDirectory(realdir)
+    self.assertItemsEqual(x.Runs(), ['path1', 'path2', 'path2/path2'])
+    self.assertEqual(
+        x._GetAccumulator('path2/path2')._path, path2_2, 'loader2 path correct')
+
+  def testAddRunsFromDirectoryThatContainsEvents(self):
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+    join = os.path.join
+    realdir = join(tmpdir, 'event_containing_directory')
+
+    _CreateCleanDirectory(realdir)
+
+    self.assertEqual(x.Runs(), {})
+
+    _AddEvents(realdir)
+    x.AddRunsFromDirectory(realdir)
+    self.assertItemsEqual(x.Runs(), ['.'])
+
+    subdir = join(realdir, 'subdir')
+    _AddEvents(subdir)
+    x.AddRunsFromDirectory(realdir)
+    self.assertItemsEqual(x.Runs(), ['.', 'subdir'])
+
+  def testAddRunsFromDirectoryWithRunNames(self):
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+    join = os.path.join
+    realdir = join(tmpdir, 'event_containing_directory')
+
+    _CreateCleanDirectory(realdir)
+
+    self.assertEqual(x.Runs(), {})
+
+    _AddEvents(realdir)
+    x.AddRunsFromDirectory(realdir, 'foo')
+    self.assertItemsEqual(x.Runs(), ['foo/.'])
+
+    subdir = join(realdir, 'subdir')
+    _AddEvents(subdir)
+    x.AddRunsFromDirectory(realdir, 'foo')
+    self.assertItemsEqual(x.Runs(), ['foo/.', 'foo/subdir'])
+
+  def testAddRunsFromDirectoryWalksTree(self):
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+    join = os.path.join
+    realdir = join(tmpdir, 'event_containing_directory')
+
+    _CreateCleanDirectory(realdir)
+    _AddEvents(realdir)
+    sub = join(realdir, 'subdirectory')
+    sub1 = join(sub, '1')
+    sub2 = join(sub, '2')
+    sub1_1 = join(sub1, '1')
+    _AddEvents(sub1)
+    _AddEvents(sub2)
+    _AddEvents(sub1_1)
+    x.AddRunsFromDirectory(realdir)
+
+    self.assertItemsEqual(x.Runs(), ['.', 'subdirectory/1', 'subdirectory/2',
+                                     'subdirectory/1/1'])
+
+  def testAddRunsFromDirectoryThrowsException(self):
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+
+    filepath = _AddEvents(tmpdir)
+    with self.assertRaises(ValueError):
+      x.AddRunsFromDirectory(filepath)
+
+  def testAddRun(self):
+    x = event_multiplexer.EventMultiplexer()
+    x.AddRun('run1_path', 'run1')
+    run1 = x._GetAccumulator('run1')
+    self.assertEqual(sorted(x.Runs().keys()), ['run1'])
+    self.assertEqual(run1._path, 'run1_path')
+
+    x.AddRun('run1_path', 'run1')
+    self.assertEqual(run1, x._GetAccumulator('run1'), 'loader not recreated')
+
+    x.AddRun('run2_path', 'run1')
+    new_run1 = x._GetAccumulator('run1')
+    self.assertEqual(new_run1._path, 'run2_path')
+    self.assertNotEqual(run1, new_run1)
+
+    x.AddRun('runName3')
+    self.assertItemsEqual(sorted(x.Runs().keys()), ['run1', 'runName3'])
+    self.assertEqual(x._GetAccumulator('runName3')._path, 'runName3')
+
+  def testAddRunMaintainsLoading(self):
+    x = event_multiplexer.EventMultiplexer()
+    x.Reload()
+    x.AddRun('run1')
+    x.AddRun('run2')
+    self.assertTrue(x._GetAccumulator('run1').reload_called)
+    self.assertTrue(x._GetAccumulator('run2').reload_called)
+
+
+class EventMultiplexerWithRealAccumulatorTest(tf.test.TestCase):
+
+  def testDeletingDirectoryRemovesRun(self):
+    x = event_multiplexer.EventMultiplexer()
+    tmpdir = self.get_temp_dir()
+    join = os.path.join
+    run1_dir = join(tmpdir, 'run1')
+    run2_dir = join(tmpdir, 'run2')
+    run3_dir = join(tmpdir, 'run3')
+
+    for dirname in [run1_dir, run2_dir, run3_dir]:
+      _AddEvents(dirname)
+
+    x.AddRun(run1_dir, 'run1')
+    x.AddRun(run2_dir, 'run2')
+    x.AddRun(run3_dir, 'run3')
+
+    x.Reload()
+
+    # Delete the directory, then reload.
+    shutil.rmtree(run2_dir)
+    x.Reload()
+    self.assertNotIn('run2', x.Runs().keys())
+
+
+if __name__ == '__main__':
+  tf.test.main()
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+from stripstream.pddl.logic.connectives import Not, Or, And
+from stripstream.pddl.logic.quantifiers import Exists, ForAll
+from stripstream.pddl.logic.atoms import Equal
+from stripstream.pddl.operators import Action, Axiom
+from stripstream.utils import irange, INF
+from stripstream.pddl.utils import rename_easy
+from stripstream.pddl.problem import STRIPStreamProblem
+from stripstream.pddl.cond_streams import EasyGenStream, EasyTestStream
+from stripstream.pddl.objects import EasyType as Type, EasyParameter as Param
+from stripstream.pddl.logic.predicates import EasyPredicate as Pred
+from stripstream.pddl.examples.continuous_tamp.continuous_tamp_utils import are_colliding, in_region,  sample_region_pose, inverse_kinematics
+from stripstream.pddl.utils import get_value
+
+EAGER_TESTS = True
+
+CONF, BLOCK, POSE, REGION = Type(), Type(), Type(), Type()
+
+AtConf = Pred(CONF)
+HandEmpty = Pred()
+AtPose = Pred(BLOCK, POSE)
+Holding = Pred(BLOCK)
+
+Safe = Pred(BLOCK, BLOCK, POSE)
+InRegion = Pred(BLOCK, REGION)
+
+
+LegalKin = Pred(POSE, CONF)
+CollisionFree = Pred(BLOCK, POSE, BLOCK, POSE)
+Contained = Pred(BLOCK, POSE, REGION)
+CanPlace = Pred(BLOCK, REGION)
+
+IsSink = Pred(REGION)
+IsStove = Pred(REGION)
+Cleaned = Pred(BLOCK)
+Cooked = Pred(BLOCK)
+
+rename_easy(locals())
+
+
+def compile_problem(tamp_problem):
+    """
+    Constructs a STRIPStream problem for the continuous TMP problem.
+
+    :param tamp_problem: a :class:`.TMPProblem`
+    :return: a :class:`.STRIPStreamProblem`
+    """
+
+    B1, B2 = Param(BLOCK), Param(BLOCK)
+    P1, P2 = Param(POSE), Param(POSE)
+    Q1, Q2 = Param(CONF), Param(CONF)
+    R = Param(REGION)
+
+    actions = [
+        Action(name='pick', parameters=[B1, P1, Q1],
+               condition=And(AtPose(B1, P1), HandEmpty(),
+                             AtConf(Q1), LegalKin(P1, Q1)),
+               effect=And(Holding(B1), Not(AtPose(B1, P1)), Not(HandEmpty()))),
+        Action(name='place', parameters=[B1, P1, Q1],
+               condition=And(Holding(B1), AtConf(Q1), LegalKin(P1, Q1),
+                             ForAll([B2], Or(Equal(B1, B2), Safe(B2, B1, P1)))),
+               effect=And(AtPose(B1, P1), HandEmpty(), Not(Holding(B1)))),
+        Action(name='move', parameters=[Q1, Q2],
+               condition=AtConf(Q1),
+               effect=And(AtConf(Q2), Not(AtConf(Q1)))),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        Action(name='clean', parameters=[B1, R],
+               condition=And(InRegion(B1, R), IsSink(R)),
+               effect=And(Cleaned(B1))),
+        Action(name='cook', parameters=[B1, R],
+               condition=And(InRegion(B1, R), IsStove(R)),
+               effect=And(Cooked(B1))),
+    ]
+
+    axioms = [
+        Axiom(effect=InRegion(B1, R), condition=Exists(
+            [P1], And(AtPose(B1, P1), Contained(B1, P1, R)))),
+        Axiom(effect=Safe(B2, B1, P1), condition=Exists(
+            [P2], And(AtPose(B2, P2), CollisionFree(B1, P1, B2, P2)))),
+    ]
+
+    cond_streams = [
+        EasyGenStream(inputs=[R, B1], outputs=[P1], conditions=[CanPlace(B1, R)], effects=[Contained(B1, P1, R)],
+                      generator=lambda r, b: (sample_region_pose(r, b) for _ in irange(0, INF))),
+        EasyGenStream(inputs=[P1], outputs=[Q1], conditions=[], effects=[LegalKin(P1, Q1)],
+                      generator=lambda p: iter([inverse_kinematics(p)])),
+        EasyTestStream(inputs=[R, B1, P1], conditions=[], effects=[Contained(B1, P1, R)],
+                       test=in_region, eager=EAGER_TESTS, plannable=False),
+        EasyTestStream(inputs=[B1, P1, B2, P2], conditions=[], effects=[CollisionFree(B1, P1, B2, P2)],
+                       test=lambda *args: not are_colliding(*args), eager=EAGER_TESTS),
+    ]
+
+    constants = [
+        REGION(tamp_problem.env_region),
+    ]
+
+    initial_atoms = [
+        AtConf(tamp_problem.initial_config),
+    ] + [
+        AtPose(block, pose) for block, pose in tamp_problem.initial_poses.iteritems()
+    ] + [
+        CanPlace(block, tamp_problem.env_region) for block in tamp_problem.initial_poses
+    ]
+
+    if tamp_problem.initial_holding is None:
+        initial_atoms.append(HandEmpty())
+    else:
+        initial_atoms.append(Holding(tamp_problem.initial_holding))
+
+    goal_literals = []
+    if tamp_problem.goal_config is not None:
+        goal_literals.append(AtConf(tamp_problem.goal_config))
+    if tamp_problem.goal_holding is False:
+        goal_literals.append(HandEmpty())
+    elif tamp_problem.goal_holding is not None:
+        goal_literals.append(Holding(tamp_problem.goal_holding))
+    for block, goal in tamp_problem.goal_poses:
+        goal_literals.append(AtPose(block, goal))
+    for block, goal in tamp_problem.goal_regions:
+        initial_atoms.append(CanPlace(block, goal))
+        goal_literals.append(InRegion(block, goal))
+
+    return STRIPStreamProblem(initial_atoms, goal_literals, actions + axioms, cond_streams, constants)
+
+
+COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'violet']
+
+
+def get_config(atoms):
+    for atom in atoms:
+        if atom.predicate == AtConf:
+            q, = atom.args
+            return get_value(q)
+    return None
+
+
+def get_holding(atoms):
+    for atom in atoms:
+        if atom.predicate == Holding:
+            b, = atom.args
+            return get_value(b)
+    return None
+
+
+def visualize_atoms(viewer, atoms):
+    for atom in atoms:
+        if atom.predicate == AtConf:
+            q, = atom.args
+            viewer.draw_robot(get_value(q))
+        elif atom.predicate == AtPose:
+            b, p = atom.args
+            viewer.draw_block(get_value(b), get_value(p))
+        elif atom.predicate == Holding:
+            b, = atom.args
+            viewer.draw_holding(get_value(b), get_config(atoms))
+
+
+def visualize_initial(tamp_problem, planning_problem):
+    from stripstream.pddl.examples.continuous_tamp.continuous_tamp_viewer import ContinuousTMPViewer
+    viewer = ContinuousTMPViewer(
+        tamp_problem.env_region, tamp_problem.get_regions(), title='Initial')
+    visualize_atoms(viewer, planning_problem.initial_atoms)
+    return viewer
+
+
+def visualize_goal(tamp_problem, planning_problem):
+    from stripstream.pddl.examples.continuous_tamp.continuous_tamp_viewer import ContinuousTMPViewer
+    viewer = ContinuousTMPViewer(
+        tamp_problem.env_region, tamp_problem.get_regions(), tl_y=300, title='Goal')
+    visualize_atoms(viewer, planning_problem.goal_literals)
+    return viewer
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+import six
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from django.dispatch import receiver
+from django.test.signals import setting_changed
+from django.utils.module_loading import import_string
+
+from filetracker.client import Client as FiletrackerClient
+
+from oioioi.base.utils import memoized, reset_memoized
+
+
+@memoized
+def get_client():
+    """Constructs a Filetracker client.
+
+       Needs a ``FILETRACKER_CLIENT_FACTORY`` entry in ``settings.py``, which
+       should contain a :term:`dotted name` of a function which returns a
+       :class:`filetracker.client.Client` instance. A good candidate is
+       :func:`~oioioi.filetracker.client.remote_storage_factory`.
+
+       The constructed client is cached.
+    """
+    factory = settings.FILETRACKER_CLIENT_FACTORY
+    if isinstance(factory, six.string_types):
+        factory = import_string(factory)
+    if not callable(factory):
+        raise ImproperlyConfigured('The FILETRACKER_CLIENT_FACTORY setting '
+                'refers to non-callable: %r' % (factory,))
+    client = factory()
+    if not isinstance(client, FiletrackerClient):
+        raise ImproperlyConfigured('The factory pointed by '
+                'FILETRACKER_CLIENT_FACTORY returned non-FiletrackerClient: '
+                '%r' % (client,))
+
+    # Needed for oioioi.sioworkers.backends.LocalBackend so that both Django
+    # and sioworkers use the same Filetracker client
+    import sio.workers.ft
+    sio.workers.ft.set_instance(client)
+
+    return client
+
+
+@receiver(setting_changed)
+def _on_setting_changed(sender, setting, **kwargs):
+    if setting == 'FILETRACKER_CLIENT_FACTORY':
+        reset_memoized(get_client)
+
+
+def remote_storage_factory():
+    """A filetracker factory which creates a client that uses the
+       remote server at ``settings.FILETRACKER_URL`` and a folder
+       ``settings.FILETRACKER_CACHE_ROOT`` as a cache directory.
+    """
+    return FiletrackerClient(remote_url=settings.FILETRACKER_URL,
+            cache_dir=settings.FILETRACKER_CACHE_ROOT)
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+"""
+Constructs for annotating base graphs.
+"""
+from __future__ import print_function
+from __future__ import division
+from builtins import range
+from past.utils import old_div
+import sys
+import numpy as np
+from .base import scope, as_apply, dfs, rec_eval, clone
+
+################################################################################
+################################################################################
+
+
+def ERR(msg):
+    print(msg, file=sys.stderr)
+
+
+implicit_stochastic_symbols = set()
+
+
+def implicit_stochastic(f):
+    implicit_stochastic_symbols.add(f.__name__)
+    return f
+
+
+@scope.define
+def rng_from_seed(seed):
+    return np.random.RandomState(seed)
+
+
+# -- UNIFORM
+
+@implicit_stochastic
+@scope.define
+def uniform(low, high, rng=None, size=()):
+    return rng.uniform(low, high, size=size)
+
+
+@implicit_stochastic
+@scope.define
+def loguniform(low, high, rng=None, size=()):
+    draw = rng.uniform(low, high, size=size)
+    return np.exp(draw)
+
+
+@implicit_stochastic
+@scope.define
+def quniform(low, high, q, rng=None, size=()):
+    draw = rng.uniform(low, high, size=size)
+    return np.round(old_div(draw, q)) * q
+
+
+@implicit_stochastic
+@scope.define
+def qloguniform(low, high, q, rng=None, size=()):
+    draw = np.exp(rng.uniform(low, high, size=size))
+    return np.round(old_div(draw, q)) * q
+
+
+# -- NORMAL
+
+@implicit_stochastic
+@scope.define
+def normal(mu, sigma, rng=None, size=()):
+    return rng.normal(mu, sigma, size=size)
+
+
+@implicit_stochastic
+@scope.define
+def qnormal(mu, sigma, q, rng=None, size=()):
+    draw = rng.normal(mu, sigma, size=size)
+    return np.round(old_div(draw, q)) * q
+
+
+@implicit_stochastic
+@scope.define
+def lognormal(mu, sigma, rng=None, size=()):
+    draw = rng.normal(mu, sigma, size=size)
+    return np.exp(draw)
+
+
+@implicit_stochastic
+@scope.define
+def qlognormal(mu, sigma, q, rng=None, size=()):
+    draw = np.exp(rng.normal(mu, sigma, size=size))
+    return np.round(old_div(draw, q)) * q
+
+
+# -- CATEGORICAL
+
+
+@implicit_stochastic
+@scope.define
+def randint(upper, rng=None, size=()):
+    # this is tricky because numpy doesn't support
+    # upper being a list of len size[0]
+    if isinstance(upper, (list, tuple)):
+        if isinstance(size, int):
+            assert len(upper) == size
+            return np.asarray([rng.randint(uu) for uu in upper])
+        elif len(size) == 1:
+            assert len(upper) == size[0]
+            return np.asarray([rng.randint(uu) for uu in upper])
+    return rng.randint(upper, size=size)
+
+
+@implicit_stochastic
+@scope.define
+def categorical(p, upper=None, rng=None, size=()):
+    """Draws i with probability p[i]"""
+    if len(p) == 1 and isinstance(p[0], np.ndarray):
+        p = p[0]
+    p = np.asarray(p)
+
+    if size == ():
+        size = (1,)
+    elif isinstance(size, (int, np.number)):
+        size = (size,)
+    else:
+        size = tuple(size)
+
+    if size == (0,):
+        return np.asarray([])
+    assert len(size)
+
+    if p.ndim == 0:
+        raise NotImplementedError()
+    elif p.ndim == 1:
+        n_draws = int(np.prod(size))
+        sample = rng.multinomial(n=1, pvals=p, size=int(n_draws))
+        assert sample.shape == size + (len(p),)
+        rval = np.dot(sample, np.arange(len(p)))
+        rval.shape = size
+        return rval
+    elif p.ndim == 2:
+        n_draws_, n_choices = p.shape
+        n_draws, = size
+        assert n_draws == n_draws_
+        rval = [np.where(rng.multinomial(pvals=p[ii], n=1))[0][0]
+                for ii in range(n_draws)]
+        rval = np.asarray(rval)
+        rval.shape = size
+        return rval
+    else:
+        raise NotImplementedError()
+
+
+def choice(args):
+    return scope.one_of(*args)
+scope.choice = choice
+
+
+def one_of(*args):
+    ii = scope.randint(len(args))
+    return scope.switch(ii, *args)
+scope.one_of = one_of
+
+
+def recursive_set_rng_kwarg(expr, rng=None):
+    """
+    Make all of the stochastic nodes in expr use the rng
+
+    uniform(0, 1) -> uniform(0, 1, rng=rng)
+    """
+    if rng is None:
+        rng = np.random.RandomState()
+    lrng = as_apply(rng)
+    for node in dfs(expr):
+        if node.name in implicit_stochastic_symbols:
+            for ii, (name, arg) in enumerate(list(node.named_args)):
+                if name == 'rng':
+                    node.named_args[ii] = ('rng', lrng)
+                    break
+            else:
+                node.named_args.append(('rng', lrng))
+    return expr
+
+
+def sample(expr, rng=None, **kwargs):
+    """
+    Parameters:
+    expr - a pyll expression to be evaluated
+
+    rng - a np.random.RandomState instance
+          default: `np.random.RandomState()`
+
+    **kwargs - optional arguments passed along to
+               `hyperopt.pyll.rec_eval`
+
+    """
+    if rng is None:
+        rng = np.random.RandomState()
+    foo = recursive_set_rng_kwarg(clone(as_apply(expr)), as_apply(rng))
+    return rec_eval(foo, **kwargs)
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import torch
+from ..utils import fft, reverse
+
+
+def toeplitz(toeplitz_column, toeplitz_row):
+    """
+    Constructs tensor version of toeplitz matrix from column vector
+    Args:
+        - toeplitz_column (vector n) - column of toeplitz matrix
+        - toeplitz_row (vector n-1) - row of toeplitz matrix
+    Returns:
+        - Matrix (n x n) - matrix representation
+    """
+    if toeplitz_column.ndimension() != 1:
+        raise RuntimeError("toeplitz_column must be a vector.")
+
+    if toeplitz_row.ndimension() != 1:
+        raise RuntimeError("toeplitz_row must be a vector.")
+
+    if toeplitz_column[0] != toeplitz_row[0]:
+        raise RuntimeError(
+            "The first column and first row of the Toeplitz matrix should have "
+            "the same first otherwise the value of T[0,0] is ambiguous. "
+            "Got: c[0]={} and r[0]={}".format(toeplitz_column[0], toeplitz_row[0])
+        )
+
+    if len(toeplitz_column) != len(toeplitz_row):
+        raise RuntimeError("c and r should have the same length " "(Toeplitz matrices are necessarily square).")
+
+    if type(toeplitz_column) != type(toeplitz_row):
+        raise RuntimeError("toeplitz_column and toeplitz_row should be the same type.")
+
+    if len(toeplitz_column) == 1:
+        return toeplitz_column.view(1, 1)
+
+    res = toeplitz_column.new(len(toeplitz_column), len(toeplitz_column))
+    for i, val in enumerate(toeplitz_column):
+        for j in range(len(toeplitz_column) - i):
+            res[j + i, j] = val
+    for i, val in list(enumerate(toeplitz_row))[1:]:
+        for j in range(len(toeplitz_row) - i):
+            res[j, j + i] = val
+    return res
+
+
+def sym_toeplitz(toeplitz_column):
+    """
+    Constructs tensor version of symmetric toeplitz matrix from column vector
+    Args:
+        - toeplitz_column (vector n) - column of Toeplitz matrix
+    Returns:
+        - Matrix (n x n) - matrix representation
+    """
+    return toeplitz(toeplitz_column, toeplitz_column)
+
+
+def toeplitz_getitem(toeplitz_column, toeplitz_row, i, j):
+    """
+    Gets the (i,j)th entry of a Toeplitz matrix T.
+    Args:
+        - toeplitz_column (vector n) - column of Toeplitz matrix
+        - toeplitz_row (vector n) - row of Toeplitz matrix
+        - i (scalar) - row of entry to get
+        - j (scalar) - column of entry to get
+    Returns:
+        - T[i,j], where T is the Toeplitz matrix specified by c and r.
+    """
+    index = i - j
+    if index < 0:
+        return toeplitz_row[abs(index)]
+    else:
+        return toeplitz_column[index]
+
+
+def sym_toeplitz_getitem(toeplitz_column, i, j):
+    """
+    Gets the (i,j)th entry of a symmetric Toeplitz matrix T.
+    Args:
+        - toeplitz_column (vector n) - column of symmetric Toeplitz matrix
+        - i (scalar) - row of entry to get
+        - j (scalar) - column of entry to get
+    Returns:
+        - T[i,j], where T is the Toeplitz matrix specified by c and r.
+    """
+    return toeplitz_getitem(toeplitz_column, toeplitz_column, i, j)
+
+
+def toeplitz_matmul(toeplitz_column, toeplitz_row, tensor):
+    """
+    Performs multiplication T * M where the matrix T is Toeplitz.
+    Args:
+        - toeplitz_column (vector n or b x n) - First column of the Toeplitz matrix T.
+        - toeplitz_row (vector n or b x n) - First row of the Toeplitz matrix T.
+        - tensor (matrix n x p or b x n x p) - Matrix or vector to multiply the Toeplitz matrix with.
+    Returns:
+        - tensor (n x p or b x n x p) - The result of the matrix multiply T * M.
+    """
+    if toeplitz_column.size() != toeplitz_row.size():
+        raise RuntimeError("c and r should have the same length (Toeplitz matrices are necessarily square).")
+
+    is_batch = True
+    if toeplitz_column.ndimension() == 1:
+        toeplitz_column = toeplitz_column.unsqueeze(0)
+        toeplitz_row = toeplitz_row.unsqueeze(0)
+        if tensor.ndimension() < 3:
+            tensor = tensor.unsqueeze(0)
+        is_batch = False
+
+    if toeplitz_column.ndimension() != 2:
+        raise RuntimeError(
+            "The first two inputs to ToeplitzMV should be vectors \
+                            (or matrices, representing batch) \
+                            (first column c and row r of the Toeplitz matrix)"
+        )
+
+    if toeplitz_column.size(0) == 1:
+        toeplitz_column = toeplitz_column.expand(tensor.size(0), toeplitz_column.size(1))
+        toeplitz_row = toeplitz_row.expand(tensor.size(0), toeplitz_row.size(1))
+
+    if toeplitz_column.size()[:2] != tensor.size()[:2]:
+        raise RuntimeError(
+            "Dimension mismatch: attempting to multiply a {}x{} Toeplitz matrix "
+            "against a matrix with leading dimension {}.".format(
+                len(toeplitz_column), len(toeplitz_column), len(tensor)
+            )
+        )
+
+    if not torch.equal(toeplitz_column[:, 0], toeplitz_row[:, 0]):
+        raise RuntimeError(
+            "The first column and first row of the Toeplitz matrix should have "
+            "the same first element, otherwise the value of T[0,0] is ambiguous. "
+            "Got: c[0]={} and r[0]={}".format(toeplitz_column[0], toeplitz_row[0])
+        )
+
+    if type(toeplitz_column) != type(toeplitz_row) or type(toeplitz_column) != type(tensor):
+        raise RuntimeError("The types of all inputs to ToeplitzMV must match.")
+
+    output_dims = tensor.ndimension()
+    if output_dims == 2:
+        tensor = tensor.unsqueeze(2)
+
+    if toeplitz_column.size(1) == 1:
+        output = toeplitz_column.view(-1, 1, 1).matmul(tensor)
+
+    else:
+        batch_size, orig_size, num_rhs = tensor.size()
+        r_reverse = reverse(toeplitz_row[:, 1:], dim=1)
+
+        c_r_rev = toeplitz_column.new(batch_size, orig_size + r_reverse.size(1)).zero_()
+        c_r_rev[:, :orig_size] = toeplitz_column
+        c_r_rev[:, orig_size:] = r_reverse
+
+        temp_tensor = toeplitz_column.new(batch_size, 2 * orig_size - 1, num_rhs).zero_()
+        temp_tensor[:, :orig_size, :] = tensor
+
+        fft_M = fft.fft1(temp_tensor.transpose(1, 2).contiguous())
+        fft_c = fft.fft1(c_r_rev).unsqueeze(1).expand_as(fft_M)
+        fft_product = toeplitz_column.new(fft_M.size()).zero_()
+
+        fft_product[:, :, :, 0].addcmul_(fft_c[:, :, :, 0], fft_M[:, :, :, 0])
+        fft_product[:, :, :, 0].addcmul_(-1, fft_c[:, :, :, 1], fft_M[:, :, :, 1])
+        fft_product[:, :, :, 1].addcmul_(fft_c[:, :, :, 1], fft_M[:, :, :, 0])
+        fft_product[:, :, :, 1].addcmul_(fft_c[:, :, :, 0], fft_M[:, :, :, 1])
+
+        output = fft.ifft1(fft_product).transpose(1, 2)
+        output = output[:, :orig_size, :]
+
+    if output_dims == 2:
+        output = output.squeeze(2)
+
+    if not is_batch:
+        output = output.squeeze(0)
+
+    return output
+
+
+def sym_toeplitz_matmul(toeplitz_column, tensor):
+    """
+    Performs a matrix-matrix multiplication TM where the matrix T is symmetric Toeplitz.
+    Args:
+        - toeplitz_column (vector n) - First column of the symmetric Toeplitz matrix T.
+        - matrix (matrix n x p) - Matrix or vector to multiply the Toeplitz matrix with.
+    Returns:
+        - tensor
+    """
+    return toeplitz_matmul(toeplitz_column, toeplitz_column, tensor)
+
+
+def sym_toeplitz_derivative_quadratic_form(left_vectors, right_vectors):
+    """
+    Given a left vector v1 and a right vector v2, computes the quadratic form:
+                                v1'*(dT/dc_i)*v2
+    for all i, where dT/dc_i is the derivative of the Toeplitz matrix with respect to
+    the ith element of its first column. Note that dT/dc_i is the same for any symmetric
+    Toeplitz matrix T, so we do not require it as an argument.
+
+    In particular, dT/dc_i is given by:
+                                [0 0; I_{m-i+1} 0] + [0 I_{m-i+1}; 0 0]
+    where I_{m-i+1} is the (m-i+1) dimensional identity matrix. In other words, dT/dc_i
+    for i=1..m is the matrix with ones on the ith sub- and superdiagonal.
+
+    Args:
+        - left_vectors (vector m or matrix s x m) - s left vectors u[j] in the quadratic form.
+        - right_vectors (vector m or matrix s x m) - s right vectors v[j] in the quadratic form.
+    Returns:
+        - vector m - a vector so that the ith element is the result of \sum_j(u[j]*(dT/dc_i)*v[j])
+    """
+    if left_vectors.ndimension() == 1:
+        left_vectors = left_vectors.unsqueeze(1)
+        right_vectors = right_vectors.unsqueeze(1)
+
+    left_vectors = left_vectors.transpose(-1, -2)
+    right_vectors = right_vectors.transpose(-1, -2)
+
+    if left_vectors.ndimension() == 3:
+        batch = True
+        batch_size, s, _ = left_vectors.size()
+        left_vectors = left_vectors.contiguous().view(batch_size * s, -1)
+        right_vectors = right_vectors.contiguous().view(batch_size * s, -1)
+    else:
+        batch = False
+
+    s, m = left_vectors.size()
+
+    left_vectors.contiguous()
+    right_vectors.contiguous()
+
+    columns = left_vectors.new(s, m).fill_(0)
+    columns[:, 0] = left_vectors[:, 0]
+    res = toeplitz_matmul(columns, left_vectors, right_vectors)
+    rows = reverse(left_vectors, dim=1)
+    columns[:, 0] = rows[:, 0]
+    res += toeplitz_matmul(columns, rows, reverse(right_vectors, dim=1))
+
+    if not batch:
+        res = res.sum(0)
+        res[0] -= (left_vectors * right_vectors).sum()
+    else:
+        res = res.contiguous().view(batch_size, -1, m).sum(1)
+        res[:, 0] -= (left_vectors * right_vectors).view(batch_size, -1).sum(1)
+
+    return res
+
+Query: semantic search tool for text
+
+************************** NEXT RESULT **************************************
+# Copyright (C) 2007-2012 by the Free Software Foundation, Inc.
+#
+# This file is part of GNU Mailman.
+#
+# GNU Mailman is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# GNU Mailman is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# GNU Mailman.  If not, see <http://www.gnu.org/licenses/>.
+
+"""Interfaces describing the basics of chains and links."""
+
+from __future__ import absolute_import, unicode_literals
+
+__metaclass__ = type
+__all__ = [
+    'IChain',
+    'IChainIterator',
+    'IChainLink',
+    'IMutableChain',
+    'LinkAction',
+    ]
+
+
+from flufl.enum import Enum
+from zope.interface import Interface, Attribute
+
+
+
+class LinkAction(Enum):
+    # Jump to another chain.
+    jump = 0
+    # Take a detour to another chain, returning to the original chain when
+    # completed (if no other jump occurs).
+    detour = 1
+    # Stop processing all chains.
+    stop = 2
+    # Continue processing the next link in the chain.
+    defer = 3
+    # Run a function and continue processing.
+    run = 4
+
+
+
+class IChainLink(Interface):
+    """A link in the chain."""
+
+    rule = Attribute('The rule to run for this link.')
+
+    action = Attribute('The LinkAction to take if this rule matches.')
+
+    chain = Attribute('The chain to jump or detour to.')
+
+    function = Attribute(
+        """The function to execute.
+
+        The function takes three arguments and returns nothing.
+        :param mlist: the IMailingList object
+        :param msg: the message being processed
+        :param msgdata: the message metadata dictionary
+        """)
+
+
+
+class IChain(Interface):
+    """A chain of rules."""
+
+    name = Attribute('Chain name; must be unique.')
+    description = Attribute('A brief description of the chain.')
+
+    def get_links(mlist, msg, msgdata):
+        """Get an `IChainIterator` for processing.
+
+        :param mlist: The mailing list.
+        :param msg: The message being processed.
+        :param msgdata: The message metadata dictionary.
+        :return: `IChainIterator`.
+        """
+
+
+
+class IChainIterator(Interface):
+    """An iterator over chain rules."""
+
+    def __iter__():
+        """Iterate over all the IChainLinks in this chain.
+
+        :return: an IChainLink.
+        """
+
+
+
+class IMutableChain(IChain):
+    """Like `IChain` but can be mutated."""
+
+    def append_link(link):
+        """Add a new chain link to the end of this chain.
+
+        :param link: The chain link to add.
+        """
+
+    def flush():
+        """Delete all links in this chain."""
+

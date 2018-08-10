@@ -1,0 +1,1445 @@
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+"""
+Train TC on all *good* objects in the 11,057 overlap set 
+(9594 objects)
+"""
+
+import numpy as np
+import glob
+import matplotlib.pyplot as plt
+import sys
+import os
+import pyfits
+from astropy.table import Table
+from matplotlib.colors import LogNorm
+from matplotlib import rc
+rc('font', family='serif')
+rc('text', usetex=True)
+from TheCannon import lamost
+from TheCannon import dataset
+from TheCannon import model
+
+
+def load_data():
+    print("Loading all data...")
+    a = pyfits.open("../data/label_file.fits") 
+    tbdata = a[1].data
+    a.close()
+    apogee_teff = tbdata['apogee_teff']
+    apogee_logg = tbdata['apogee_logg']
+    apogee_mh = tbdata['apogee_mh']
+    apogee_alpham = tbdata['apogee_alpham']
+    apogee_reddening = tbdata['AK_WISE']
+    tr_label = np.vstack((apogee_teff,apogee_logg,apogee_mh,apogee_alpham,apogee_reddening)).T
+    tr_id_full = tbdata['lamost_id']
+    tr_id = np.array([val.strip() for val in tr_id_full])
+
+    # Load data for all 11,057 overlap objects & select training data
+    all_id = np.load("../data/all_ids.npz")['arr_0']
+    all_flux = np.load("../data/test_flux.npz")['arr_0']
+    all_ivar = np.load("../data/test_ivar.npz")['arr_0']
+
+    print("Selecting training data...")
+    good = np.array([np.where(all_id==f)[0][0] for f in tr_id])
+
+    good_flux = all_flux[good,:] 
+    good_ivar = all_ivar[good,:]
+
+    np.savez("tr_id.npz", tr_id)
+    np.savez("tr_label.npz", tr_label)
+    np.savez("tr_flux.npz", good_flux)
+    np.savez("tr_ivar.npz", good_ivar)
+
+
+def train():
+    # Load training set
+    wl = np.load("../data/wl.npz")['arr_0']
+    tr_id = np.load("tr_id.npz")['arr_0']
+    tr_label = np.load("tr_label.npz")['arr_0']
+    tr_flux = np.load("tr_flux.npz")['arr_0']
+    tr_ivar = np.load("tr_ivar.npz")['arr_0']
+
+    ds = dataset.Dataset(
+            wl, tr_id, tr_flux, tr_ivar, tr_label, tr_id, tr_flux, tr_ivar)
+    ds.set_label_names(['T_{eff}', '\log g', '[M/H]', '[\\alpha/Fe]', 'AKWISE'])
+    ds.diagnostics_SNR()
+    ds.diagnostics_ref_labels()
+    np.savez("./tr_snr.npz", ds.tr_SNR)
+
+    m = model.CannonModel(2)
+    m.fit(ds)
+    np.savez("./coeffs.npz", m.coeffs)
+    np.savez("./scatters.npz", m.scatters)
+    np.savez("./chisqs.npz", m.chisqs)
+    np.savez("./pivots.npz", m.pivots)
+    m.diagnostics_leading_coeffs(ds)
+    m.diagnostics_leading_coeffs_triangle(ds)
+    m.diagnostics_plot_chisq(ds)
+
+
+if __name__=="__main__":
+    #load_data()
+    train()
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+import numpy as np
+import pandas as pd
+import json
+from tl_algs import tl_alg
+
+
+class Target_Baseline(tl_alg.Base_Transfer):
+    """
+    Train classifier using only target or in-domain data, and no source or
+    cross-domain data.
+    """
+
+    def __init__(self, test_set_X, test_set_domain, train_pool_X, train_pool_y,
+                 train_pool_domain, Base_Classifier, rand_seed=None,
+                 classifier_params={}):
+
+        super(Target_Baseline, self).__init__(
+            test_set_X,
+            test_set_domain,
+            train_pool_X,
+            train_pool_y,
+            train_pool_domain,
+            Base_Classifier,
+            rand_seed=rand_seed,
+            classifier_params=classifier_params
+        )
+
+    def train_filter_test(self):
+        """
+        Train classifier using only target data and return class predictions
+        and class-prediction probabilities. Note that the target baseline uses
+        no source data.
+
+        Returns:
+            confidence: List of predicted-class probabilities, the ith entry
+                of which gives the confidence value for the ith prediction.
+            predictions: List of class predictions.
+        """
+
+        X_target = self.train_pool_X[
+            np.array(self.train_pool_domain) == self.test_set_domain
+        ]
+        y_target = self.train_pool_y[
+            np.array(self.train_pool_domain) == self.test_set_domain
+        ]
+
+        classifier = self.Base_Classifier(
+            random_state=self.rand_seed,
+            **self.classifier_params
+        )
+
+        f = classifier.fit(X_target, list(y_target))
+        confidence = f.predict_proba(self.test_set_X)[:,-1]
+        predictions = f.predict(self.test_set_X)
+
+        return confidence, predictions
+
+    def json_encode(self):
+
+        return tl_alg.Base_Transfer.json_encode(self)
+
+
+class Source_Baseline(tl_alg.Base_Transfer):
+    """
+    Train classifier using only source or cross-domain data, and no target or
+    in-domain data.
+    """
+
+    def __init__(self, test_set_X, test_set_domain, train_pool_X, train_pool_y,
+                 train_pool_domain, Base_Classifier, rand_seed=None,
+                 classifier_params={}):
+
+        super(Source_Baseline, self).__init__(
+            test_set_X,
+            test_set_domain,
+            train_pool_X,
+            train_pool_y,
+            train_pool_domain,
+            Base_Classifier,
+            rand_seed=rand_seed,
+            classifier_params=classifier_params
+        )
+
+    def train_filter_test(self):
+        """
+        Train classifier using only source data and return class predictions
+        and class-prediction probabilities. Note that the source baseline uses
+        no target data.
+
+        Returns:
+            confidence: List of predicted-class probabilities, the ith entry
+                of which gives the confidence value for the ith prediction.
+            predictions: List of class predictions.
+        """
+
+        X_source = self.train_pool_X[
+            np.array(self.train_pool_domain) != self.test_set_domain
+        ]
+        y_source = self.train_pool_y[
+            np.array(self.train_pool_domain) != self.test_set_domain
+        ]
+
+        classifier = self.Base_Classifier(
+            random_state=self.rand_seed,
+            **self.classifier_params
+        )
+
+        f = classifier.fit(X_source, list(y_source))
+        confidence = f.predict_proba(self.test_set_X)
+        predictions = f.predict(self.test_set_X)
+
+        if len(confidence[0]) > 1:
+            confidence = [a[-1] for a in confidence]
+        else:
+            confidence = list(confidence)
+
+        return confidence, predictions
+
+    def json_encode(self):
+
+        return tl_alg.Base_Transfer.json_encode(self)
+
+
+class Hybrid_Baseline(tl_alg.Base_Transfer):
+    """
+    Train classifier using all available source and target training data.
+    """
+
+    def __init__(self, test_set_X, test_set_domain, train_pool_X, train_pool_y,
+                 train_pool_domain, Base_Classifier, rand_seed=None,
+                 classifier_params={}):
+
+        super(Hybrid_Baseline, self).__init__(
+            test_set_X,
+            test_set_domain,
+            train_pool_X,
+            train_pool_y,
+            train_pool_domain,
+            Base_Classifier,
+            rand_seed=rand_seed,
+            classifier_params=classifier_params
+        )
+
+    def train_filter_test(self):
+        """
+        Train classifier using all available data and return class predictions
+        and class-prediction probabilities.
+
+        Returns:
+            confidence: List of predicted-class probabilities, the ith entry
+                of which gives the confidence value for the ith prediction.
+            predictions: List of class predictions.
+        """
+
+        classifier = self.Base_Classifier(
+            random_state=self.rand_seed,
+            **self.classifier_params
+        )
+
+        f = classifier.fit(self.train_pool_X, list(self.train_pool_y))
+        confidence = f.predict_proba(self.test_set_X)
+        predictions = f.predict(self.test_set_X)
+
+        if len(confidence[0]) > 1:
+            confidence = [a[-1] for a in confidence]
+        else:
+            confidence = list(confidence)
+
+        return confidence, predictions
+
+    def json_encode(self):
+
+        return tl_alg.Base_Transfer.json_encode(self)
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+import numpy as np
+import random
+import sys
+from utils import randmatrix, progress_bar
+
+__author__ = "Christopher Potts"
+__version__ = "CS224u, Stanford, Spring 2018"
+
+
+class NNModelBase(object):
+    def __init__(self,
+            vocab,
+            embedding=None,
+            embed_dim=10,
+            hidden_dim=20,
+            eta=0.01,
+            max_iter=100,
+            tol=1e-6,
+            display_progress=True):
+        self.vocab = dict(zip(vocab, range(len(vocab))))
+        if embedding is None:
+            embedding = self._define_embedding_matrix(
+                len(self.vocab), embed_dim)
+        self.embedding = embedding
+        self.embed_dim = self.embedding.shape[1]
+        self.hidden_dim = hidden_dim
+        self.eta = eta
+        self.max_iter = max_iter
+        self.tol = tol
+        self.display_progress = display_progress
+        self.params = [
+            'embedding', 'embed_dim', 'hidden_dim', 'eta', 'max_iter']
+
+    def initialize_parameters(self):
+        raise NotImplementedError
+
+    def update_parameters(self, gradients):
+        raise NotImplementedError
+
+    def forward_propagation(self):
+        raise NotImplementedError
+
+    def backward_propagation(self):
+        raise NotImplementedError
+
+    def fit(self, X, y):
+        """Train the network.
+
+        Parameters
+        ----------
+        X : list of lists
+           Each element should be a list of elements in `self.vocab`.
+        y : list
+           The one-hot label vector.
+
+        """
+        y = self.prepare_output_data(y)
+        self.initialize_parameters()
+        # Unified view for training
+        training_data = list(zip(X, y))
+        # SGD:
+        iteration = 0
+        for iteration in range(1, self.max_iter+1):
+            error = 0.0
+            random.shuffle(training_data)
+            for ex, labels in training_data:
+                hidden_states, predictions = self.forward_propagation(ex)
+                # Cross-entropy error reduces to -log(prediction-for-correct-label):
+                error += -np.log(predictions[np.argmax(labels)])
+                # Back-prop:
+                gradients = self.backward_propagation(
+                    hidden_states, predictions, ex, labels)
+                self.update_parameters(gradients)
+            error /= len(training_data)
+            if error <= self.tol:
+                if self.display_progress:
+                    progress_bar(
+                        "Converged on iteration {} with error {}".format(
+                            iteration, error))
+                break
+            else:
+                if self.display_progress:
+                    progress_bar(
+                        "Finished epoch {} of {}; error is {}".format
+                        (iteration, self.max_iter, error))
+
+    @staticmethod
+    def _define_embedding_matrix(vocab_size, embed_dim):
+        return np.random.uniform(
+            low=-1.0, high=1.0, size=(vocab_size, embed_dim))
+
+    def predict_one_proba(self, seq):
+        """Softmax predictions for a single example.
+
+        Parameters
+        ----------
+        seq : list
+            Variable length sequence of elements in the vocabulary.
+
+        Returns
+        -------
+        np.array
+
+        """
+        hidden_states, predictions = self.forward_propagation(seq)
+        return predictions
+
+    def predict_proba(self, X):
+        """Softmax predictions for a list of examples.
+
+        Parameters
+        ----------
+        X : list of lists
+            List of examples.
+
+        Returns
+        -------
+        list of np.array
+
+        """
+        return [self.predict_one_proba(seq) for seq in X]
+
+    def predict(self, X):
+        """Predictions for a list of examples.
+
+        Parameters
+        ----------
+        X : list of lists
+            List of examples.
+
+        Returns
+        -------
+        list
+
+        """
+        return [self.predict_one(ex) for ex in X]
+
+    def predict_one(self, x):
+        """Predictions for a single example.
+
+        Parameters
+        ----------
+        seq : list
+            Variable length sequence of elements in the vocabulary.
+
+        Returns
+        -------
+        int
+            The index of the highest probability class according to
+            the model.
+
+        """
+        probs = self.predict_one_proba(x)
+        return self.classes[np.argmax(probs)]
+
+    def get_word_rep(self, w):
+        """For getting the input representation of word `w` from
+        `self.embedding`.
+
+        Parameters
+        ----------
+        w : str
+
+        Returns
+        -------
+        np.array, dimension `self.embed_dim`
+
+        """
+        if w in self.vocab:
+            word_index = self.vocab[w]
+        else:
+            word_index = self.vocab['$UNK']
+        return self.embedding[word_index]
+
+    @staticmethod
+    def weight_init(m, n):
+        """Uses the Xavier Glorot method for initializing the weights
+        of an `m` by `n` matrix.
+
+        Parameters
+        ----------
+        m : int
+            Row dimension
+        n : int
+            Column dimension
+
+        Returns
+        -------
+        np.array, shape `(m, n)`
+
+        """
+        x = np.sqrt(6.0/(m+n))
+        return randmatrix(m, n, lower=-x, upper=x)
+
+    def prepare_output_data(self, y):
+        """Format `y` into a vector of one-hot encoded vectors.
+
+        Parameters
+        ----------
+        y : list
+
+        Returns
+        -------
+        np.array with length the same as y and each row the
+        length of the number of classes
+
+        """
+        self.classes = sorted(set(y))
+        self.output_dim = len(self.classes)
+        y = self._onehot_encode(y)
+        return y
+
+    def _onehot_encode(self, y):
+        """Maps a single label `y` to a one-hot encoding with 1.0 in
+        the position of y and 0.0 for all other classes.
+
+        Parameters
+        ----------
+        y : object
+            Typically a str, int, or bool
+
+        Returns
+        -------
+        np.array, dimension `len(self.classes)`
+
+        """
+        classmap = dict(zip(self.classes, range(self.output_dim)))
+        y_ = np.zeros((len(y), self.output_dim))
+        for i, cls in enumerate(y):
+            y_[i][classmap[cls]] = 1.0
+        return y_
+
+    def prepare_output_data(self, y):
+        """Format `y` so that Tensorflow can deal with it, by turning
+        it into a vector of one-hot encoded vectors.
+
+        Parameters
+        ----------
+        y : list
+
+        Returns
+        -------
+        np.array with length the same as y and each row the
+        length of the number of classes
+
+        """
+        self.classes = sorted(set(y))
+        self.output_dim = len(self.classes)
+        y = self._onehot_encode(y)
+        return y
+
+    def get_params(self, deep=True):
+        """Gets the hyperparameters for the model, as given by the
+        `self.params` attribute. This is called `get_params` for
+        compatibility with sklearn.
+
+        Returns
+        -------
+        dict
+            Map from attribute names to their values.
+
+        """
+        return {p: getattr(self, p) for p in self.params}
+
+    def set_params(self, **params):
+        for key, val in params.items():
+            setattr(self, key, val)
+        return self
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+'''Train'''
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
+import argparse
+import os
+import sys
+
+import chainer
+import chainer.training
+import chainer.training.extensions as extensions
+
+import wavenet.models as models
+import wavenet.utils as utils
+import wavenet.parameter_statistics as stats
+
+
+def main():
+    parser = argparse.ArgumentParser(description='PixelCNN')
+    parser.add_argument('--batchsize', '-b', type=int, default=16,
+                        help='Number of images in each mini-batch')
+    parser.add_argument('--epoch', '-e', type=int, default=20,
+                        help='Number of sweeps over the dataset to train')
+    parser.add_argument('--gpu', '-g', type=int, default=-1,
+                        help='GPU ID (negative value indicates CPU)')
+    parser.add_argument('--resume', '-r', default='',
+                        help='Resume the training from snapshot')
+    parser.add_argument('--out', '-o', default='',
+                        help='Output directory')
+    parser.add_argument('--data','-d', default=os.getcwd(),
+                        help='Input data directory')
+    parser.add_argument('--hidden_dim', type=int, default=32,
+                        help='Number of hidden dimensions')
+    parser.add_argument('--out_hidden_dim', type=int, default=32,
+                        help='Number of hidden dimensions')
+    parser.add_argument('--stacks_num', '-s', type=int, default=5,
+                        help='Number of stacks')
+    parser.add_argument('--layers_num', '-l', type=int, default=10,
+                        help='Number of layers per stack')
+    parser.add_argument('--learning_rate', type=float, default=0.001,
+                        help='Learning rate')
+    parser.add_argument('--clip', type=float, default=1.,
+                        help='L2 norm gradient clipping')
+    parser.add_argument('--weight_decay', type=float, default=0.0001,
+                        help='Weight decay rate (L2 regularization)')
+    parser.add_argument('--levels', type=int, default=256,
+                        help='Level number to quantisize values')
+    parser.add_argument('--stats', action='store_true',
+                        help='Collect layerwise statistics')
+    args = parser.parse_args()
+
+    model = models.Classifier(
+        models.WaveNet(args.levels, args.hidden_dim, args.out_hidden_dim, args.stacks_num,
+                       args.layers_num, 2))
+
+    if args.gpu >= 0:
+        chainer.cuda.get_device(args.gpu).use()
+        model.to_gpu()
+
+    optimizer = chainer.optimizers.Adam(args.learning_rate)
+    optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer.GradientClipping(args.clip))
+    optimizer.add_hook(chainer.optimizer.WeightDecay(args.weight_decay))
+
+    train = utils.VCTK(
+        args.data,
+        utils.receptive_field_size(args.layers_num, args.stacks_num))
+
+    train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
+    updater = chainer.training.StandardUpdater(train_iter, optimizer, device=args.gpu)
+    trainer = chainer.training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
+
+    log_trigger = (1, 'epoch')
+    trainer.extend(extensions.LogReport(trigger=log_trigger))
+    trainer.extend(extensions.ProgressBar(update_interval=50))
+    trainer.extend(extensions.snapshot())
+    trainer.extend(
+        extensions.snapshot_object(model.predictor, 'wavenet_{.updater.iteration}'),
+        trigger=chainer.training.triggers.MinValueTrigger('main/nll'))
+    if args.stats:
+        trainer.extend(stats.ParameterStatistics([
+            # put here layers to monitor
+        ]))
+
+    if args.resume:
+        chainer.serializers.load_npz(args.resume, trainer)
+
+    trainer.run()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+from __future__ import unicode_literals
+
+from py4j import java_gateway
+import pandas as pd
+
+from ml_models import KMeansModel, LinearRegressionModel, LogisticRegressionModel
+import util
+
+
+def kmeans(data, centers=2, runs=5, max_iters=10):
+    """
+    Train Kmeans on a given DDF
+    :param data: DDF
+    :param centers: number of clusters
+    :param runs: number of runs
+    :param max_iters: number of iterations
+    :return: an object of type KMeansModel
+    """
+    ml_obj = java_gateway.get_field(data._jddf, 'ML')
+    return KMeansModel(ml_obj.KMeans(centers, runs, max_iters), data._gateway_client, data.colnames)
+
+
+def linear_regression_gd(data, step_size=1.0, batch_fraction=1.0, max_iters=10):
+    """
+    Linear regression with gradient descent
+    :param data:
+    :param step_size:
+    :param batch_fraction:
+    :param max_iters:
+    :return:
+    """
+    ml_obj = java_gateway.get_field(data._jddf, 'ML')
+    gateway = data._gateway_client
+    model = ml_obj.train('linearRegressionWithSGD',
+                         util.to_java_array([max_iters, step_size, batch_fraction],
+                                            gateway.jvm.Object, gateway))
+    weights = [float(model.getRawModel().intercept())] + list(model.getRawModel().weights().toArray())
+    weights = pd.DataFrame(data=[weights], columns=['Intercept'] + data.colnames[:-1])
+    return LinearRegressionModel(model, gateway, weights)
+
+
+def logistic_regression_gd(data, step_size=1.0, max_iters=10):
+    """
+
+    :param data:
+    :param step_size:
+    :param max_iters:
+    :return:
+    """
+    ml_obj = java_gateway.get_field(data._jddf, 'ML')
+    gateway = data._gateway_client
+    model = ml_obj.train('logisticRegressionWithSGD',
+                         util.to_java_array([max_iters, step_size],
+                                            gateway.jvm.Object, gateway))
+    weights = [float(model.getRawModel().intercept())] + list(model.getRawModel().weights().toArray())
+    weights = pd.DataFrame(data=[weights], columns=['Intercept'] + data.colnames[:-1])
+    return LogisticRegressionModel(model, gateway, weights)
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+#!/usr/bin/env python
+# Copyright 2016 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+"""Trains MNIST using a custom estimator, with the model based on the one here:
+https://www.tensorflow.org/versions/r0.11/tutorials/mnist/pros/index.html#deep-mnist-for-experts
+"""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import argparse
+import os
+import time
+
+import tensorflow as tf
+from tensorflow.contrib.learn import ModeKeys
+from tensorflow.examples.tutorials.mnist import input_data
+
+FLAGS = None
+
+# comment out for less info during the training runs.
+tf.logging.set_verbosity(tf.logging.INFO)
+
+
+def weight_variable(shape):
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
+
+
+def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
+    return tf.Variable(initial)
+
+
+def conv2d(x, W):
+    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+
+def max_pool_2x2(x):
+    return tf.nn.max_pool(
+        x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+
+
+def model_fn(x, target, mode, params):
+    """Model function for Estimator."""
+
+    # YOUR CODE HERE.
+
+    # Build your model graph, including the loss function and training op.
+    # You don’t need to define ‘placeholders’— they are passed in
+    # as the first 2 args (here, x and target).
+    # You can use the mode values — ModeKeys.TRAIN, ModeKeys.EVAL, and
+    # ModeKeys.INFER, if there is part of the graph that you only want to
+    # build under some of the contexts.
+
+    # Note that instead of one 'prediction' value, you can alternately
+    # construct and return a prediction dict
+    return prediction, cross_entropy, train_op
+
+
+def run_cnn_classifier():
+    """Run a CNN classifier using a custom Estimator."""
+
+    print("Downloading and reading data sets...")
+    mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
+
+    # Set model params
+    model_params = {"learning_rate": 1e-4, "dropout": 0.5}
+
+    # YOUR CODE HERE
+    # Create a tf.contrib.learn.Estimator called 'cnn', and call its 'fit()'
+    # method to train it.
+
+    # ....
+
+    # After training, evaluate accuracy.
+    print(cnn.evaluate(mnist.test.images, mnist.test.labels))
+
+    # Print out some predictions, just drawn from the test data.
+    batch = mnist.test.next_batch(20)
+    predictions = cnn.predict(x=batch[0], as_iterable=True)
+    for i, p in enumerate(predictions):
+        print("Prediction: %s for correct answer %s" %
+              (p, list(batch[1][i]).index(1)))
+
+
+def main(_):
+    run_cnn_classifier()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default='/tmp/MNIST_data',
+                        help='Directory for storing data')
+    parser.add_argument('--model_dir', type=str,
+                        default=os.path.join(
+                            "/tmp/tfmodels/mnist_estimator",
+                            str(int(time.time()))),
+                        help='Directory for storing model info')
+    parser.add_argument('--num_steps', type=int,
+                        default=20000,
+                        help='Number of training steps to run')
+    FLAGS = parser.parse_args()
+    tf.app.run()
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+# Copyright 2017 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+r"""Trains the PixelDA model."""
+
+from functools import partial
+import os
+
+# Dependency imports
+
+import tensorflow as tf
+
+from domain_adaptation.datasets import dataset_factory
+from domain_adaptation.pixel_domain_adaptation import pixelda_losses
+from domain_adaptation.pixel_domain_adaptation import pixelda_model
+from domain_adaptation.pixel_domain_adaptation import pixelda_preprocess
+from domain_adaptation.pixel_domain_adaptation import pixelda_utils
+from domain_adaptation.pixel_domain_adaptation.hparams import create_hparams
+
+slim = tf.contrib.slim
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+
+flags.DEFINE_string('master', '', 'BNS name of the TensorFlow master to use.')
+
+flags.DEFINE_integer(
+    'ps_tasks', 0,
+    'The number of parameter servers. If the value is 0, then the parameters '
+    'are handled locally by the worker.')
+
+flags.DEFINE_integer(
+    'task', 0,
+    'The Task ID. This value is used when training with multiple workers to '
+    'identify each worker.')
+
+flags.DEFINE_string('train_log_dir', '/tmp/pixelda/',
+                    'Directory where to write event logs.')
+
+flags.DEFINE_integer(
+    'save_summaries_steps', 500,
+    'The frequency with which summaries are saved, in seconds.')
+
+flags.DEFINE_integer('save_interval_secs', 300,
+                     'The frequency with which the model is saved, in seconds.')
+
+flags.DEFINE_boolean('summarize_gradients', False,
+                     'Whether to summarize model gradients')
+
+flags.DEFINE_integer(
+    'print_loss_steps', 100,
+    'The frequency with which the losses are printed, in steps.')
+
+flags.DEFINE_string('source_dataset', 'mnist', 'The name of the source dataset.'
+                    ' If hparams="arch=dcgan", this flag is ignored.')
+
+flags.DEFINE_string('target_dataset', 'mnist_m',
+                    'The name of the target dataset.')
+
+flags.DEFINE_string('source_split_name', 'train',
+                    'Name of the train split for the source.')
+
+flags.DEFINE_string('target_split_name', 'train',
+                    'Name of the train split for the target.')
+
+flags.DEFINE_string('dataset_dir', '',
+                    'The directory where the datasets can be found.')
+
+flags.DEFINE_integer(
+    'num_readers', 4,
+    'The number of parallel readers that read data from the dataset.')
+
+flags.DEFINE_integer('num_preprocessing_threads', 4,
+                     'The number of threads used to create the batches.')
+
+# HParams
+
+flags.DEFINE_string('hparams', '', 'Comma separated hyperparameter values')
+
+
+def _get_vars_and_update_ops(hparams, scope):
+  """Returns the variables and update ops for a particular variable scope.
+
+  Args:
+    hparams: The hyperparameters struct.
+    scope: The variable scope.
+
+  Returns:
+    A tuple consisting of trainable variables and update ops.
+  """
+  is_trainable = lambda x: x in tf.trainable_variables()
+  var_list = filter(is_trainable, slim.get_model_variables(scope))
+  global_step = slim.get_or_create_global_step()
+
+  update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope)
+
+  tf.logging.info('All variables for scope: %s',
+                  slim.get_model_variables(scope))
+  tf.logging.info('Trainable variables for scope: %s', var_list)
+
+  return var_list, update_ops
+
+
+def _train(discriminator_train_op,
+           generator_train_op,
+           logdir,
+           master='',
+           is_chief=True,
+           scaffold=None,
+           hooks=None,
+           chief_only_hooks=None,
+           save_checkpoint_secs=600,
+           save_summaries_steps=100,
+           hparams=None):
+  """Runs the training loop.
+
+  Args:
+    discriminator_train_op: A `Tensor` that, when executed, will apply the
+      gradients and return the loss value for the discriminator.
+    generator_train_op: A `Tensor` that, when executed, will apply the
+      gradients and return the loss value for the generator.
+    logdir: The directory where the graph and checkpoints are saved.
+    master: The URL of the master.
+    is_chief: Specifies whether or not the training is being run by the primary
+      replica during replica training.
+    scaffold: An tf.train.Scaffold instance.
+    hooks: List of `tf.train.SessionRunHook` callbacks which are run inside the
+      training loop.
+    chief_only_hooks: List of `tf.train.SessionRunHook` instances which are run
+      inside the training loop for the chief trainer only.
+    save_checkpoint_secs: The frequency, in seconds, that a checkpoint is saved
+      using a default checkpoint saver. If `save_checkpoint_secs` is set to
+      `None`, then the default checkpoint saver isn't used.
+    save_summaries_steps: The frequency, in number of global steps, that the
+      summaries are written to disk using a default summary saver. If
+      `save_summaries_steps` is set to `None`, then the default summary saver
+      isn't used.
+    hparams: The hparams struct.
+
+  Returns:
+    the value of the loss function after training.
+
+  Raises:
+    ValueError: if `logdir` is `None` and either `save_checkpoint_secs` or
+    `save_summaries_steps` are `None.
+  """
+  global_step = slim.get_or_create_global_step()
+
+  scaffold = scaffold or tf.train.Scaffold()
+
+  hooks = hooks or []
+
+  if is_chief:
+    session_creator = tf.train.ChiefSessionCreator(
+        scaffold=scaffold, checkpoint_dir=logdir, master=master)
+
+    if chief_only_hooks:
+      hooks.extend(chief_only_hooks)
+    hooks.append(tf.train.StepCounterHook(output_dir=logdir))
+
+    if save_summaries_steps:
+      if logdir is None:
+        raise ValueError(
+            'logdir cannot be None when save_summaries_steps is None')
+      hooks.append(
+          tf.train.SummarySaverHook(
+              scaffold=scaffold,
+              save_steps=save_summaries_steps,
+              output_dir=logdir))
+
+    if save_checkpoint_secs:
+      if logdir is None:
+        raise ValueError(
+            'logdir cannot be None when save_checkpoint_secs is None')
+      hooks.append(
+          tf.train.CheckpointSaverHook(
+              logdir, save_secs=save_checkpoint_secs, scaffold=scaffold))
+  else:
+    session_creator = tf.train.WorkerSessionCreator(
+        scaffold=scaffold, master=master)
+
+  with tf.train.MonitoredSession(
+      session_creator=session_creator, hooks=hooks) as session:
+    loss = None
+    while not session.should_stop():
+      # Run the domain classifier op X times.
+      for _ in range(hparams.discriminator_steps):
+        if session.should_stop():
+          return loss
+        loss, np_global_step = session.run(
+            [discriminator_train_op, global_step])
+        if np_global_step % FLAGS.print_loss_steps == 0:
+          tf.logging.info('Step %d: Discriminator Loss = %.2f', np_global_step,
+                          loss)
+
+      # Run the generator op X times.
+      for _ in range(hparams.generator_steps):
+        if session.should_stop():
+          return loss
+        loss, np_global_step = session.run([generator_train_op, global_step])
+        if np_global_step % FLAGS.print_loss_steps == 0:
+          tf.logging.info('Step %d: Generator Loss = %.2f', np_global_step,
+                          loss)
+  return loss
+
+
+def run_training(run_dir, checkpoint_dir, hparams):
+  """Runs the training loop.
+
+  Args:
+    run_dir: The directory where training specific logs are placed
+    checkpoint_dir: The directory where the checkpoints and log files are
+      stored.
+    hparams: The hyperparameters struct.
+
+  Raises:
+    ValueError: if hparams.arch is not recognized.
+  """
+  for path in [run_dir, checkpoint_dir]:
+    if not tf.gfile.Exists(path):
+      tf.gfile.MakeDirs(path)
+
+  # Serialize hparams to log dir
+  hparams_filename = os.path.join(checkpoint_dir, 'hparams.json')
+  with tf.gfile.FastGFile(hparams_filename, 'w') as f:
+    f.write(hparams.to_json())
+
+  with tf.Graph().as_default():
+    with tf.device(tf.train.replica_device_setter(FLAGS.ps_tasks)):
+      global_step = slim.get_or_create_global_step()
+
+      #########################
+      # Preprocess the inputs #
+      #########################
+      target_dataset = dataset_factory.get_dataset(
+          FLAGS.target_dataset,
+          split_name='train',
+          dataset_dir=FLAGS.dataset_dir)
+      target_images, _ = dataset_factory.provide_batch(
+          FLAGS.target_dataset, 'train', FLAGS.dataset_dir, FLAGS.num_readers,
+          hparams.batch_size, FLAGS.num_preprocessing_threads)
+      num_target_classes = target_dataset.num_classes
+
+      if hparams.arch not in ['dcgan']:
+        source_dataset = dataset_factory.get_dataset(
+            FLAGS.source_dataset,
+            split_name='train',
+            dataset_dir=FLAGS.dataset_dir)
+        num_source_classes = source_dataset.num_classes
+        source_images, source_labels = dataset_factory.provide_batch(
+            FLAGS.source_dataset, 'train', FLAGS.dataset_dir, FLAGS.num_readers,
+            hparams.batch_size, FLAGS.num_preprocessing_threads)
+        # Data provider provides 1 hot labels, but we expect categorical.
+        source_labels['class'] = tf.argmax(source_labels['classes'], 1)
+        del source_labels['classes']
+        if num_source_classes != num_target_classes:
+          raise ValueError(
+              'Source and Target datasets must have same number of classes. '
+              'Are %d and %d' % (num_source_classes, num_target_classes))
+      else:
+        source_images = None
+        source_labels = None
+
+      ####################
+      # Define the model #
+      ####################
+      end_points = pixelda_model.create_model(
+          hparams,
+          target_images,
+          source_images=source_images,
+          source_labels=source_labels,
+          is_training=True,
+          num_classes=num_target_classes)
+
+      #################################
+      # Get the variables to optimize #
+      #################################
+      generator_vars, generator_update_ops = _get_vars_and_update_ops(
+          hparams, 'generator')
+      discriminator_vars, discriminator_update_ops = _get_vars_and_update_ops(
+          hparams, 'discriminator')
+
+      ########################
+      # Configure the losses #
+      ########################
+      generator_loss = pixelda_losses.g_step_loss(
+          source_images,
+          source_labels,
+          end_points,
+          hparams,
+          num_classes=num_target_classes)
+      discriminator_loss = pixelda_losses.d_step_loss(
+          end_points, source_labels, num_target_classes, hparams)
+
+      ###########################
+      # Create the training ops #
+      ###########################
+      learning_rate = hparams.learning_rate
+      if hparams.lr_decay_steps:
+        learning_rate = tf.train.exponential_decay(
+            learning_rate,
+            slim.get_or_create_global_step(),
+            decay_steps=hparams.lr_decay_steps,
+            decay_rate=hparams.lr_decay_rate,
+            staircase=True)
+      tf.summary.scalar('Learning_rate', learning_rate)
+
+
+      if hparams.discriminator_steps == 0:
+        discriminator_train_op = tf.no_op()
+      else:
+        discriminator_optimizer = tf.train.AdamOptimizer(
+            learning_rate, beta1=hparams.adam_beta1)
+
+        discriminator_train_op = slim.learning.create_train_op(
+            discriminator_loss,
+            discriminator_optimizer,
+            update_ops=discriminator_update_ops,
+            variables_to_train=discriminator_vars,
+            clip_gradient_norm=hparams.clip_gradient_norm,
+            summarize_gradients=FLAGS.summarize_gradients)
+
+      if hparams.generator_steps == 0:
+        generator_train_op = tf.no_op()
+      else:
+        generator_optimizer = tf.train.AdamOptimizer(
+            learning_rate, beta1=hparams.adam_beta1)
+        generator_train_op = slim.learning.create_train_op(
+            generator_loss,
+            generator_optimizer,
+            update_ops=generator_update_ops,
+            variables_to_train=generator_vars,
+            clip_gradient_norm=hparams.clip_gradient_norm,
+            summarize_gradients=FLAGS.summarize_gradients)
+
+      #############
+      # Summaries #
+      #############
+      pixelda_utils.summarize_model(end_points)
+      pixelda_utils.summarize_transferred_grid(
+          end_points['transferred_images'], source_images, name='Transferred')
+      if 'source_images_recon' in end_points:
+        pixelda_utils.summarize_transferred_grid(
+            end_points['source_images_recon'],
+            source_images,
+            name='Source Reconstruction')
+      pixelda_utils.summaries_color_distributions(end_points['transferred_images'],
+                                               'Transferred')
+      pixelda_utils.summaries_color_distributions(target_images, 'Target')
+
+      if source_images is not None:
+        pixelda_utils.summarize_transferred(source_images,
+                                         end_points['transferred_images'])
+        pixelda_utils.summaries_color_distributions(source_images, 'Source')
+        pixelda_utils.summaries_color_distributions(
+            tf.abs(source_images - end_points['transferred_images']),
+            'Abs(Source_minus_Transferred)')
+
+      number_of_steps = None
+      if hparams.num_training_examples:
+        # Want to control by amount of data seen, not # steps
+        number_of_steps = hparams.num_training_examples / hparams.batch_size
+
+      hooks = [tf.train.StepCounterHook(),]
+
+      chief_only_hooks = [
+          tf.train.CheckpointSaverHook(
+              saver=tf.train.Saver(),
+              checkpoint_dir=run_dir,
+              save_secs=FLAGS.save_interval_secs)
+      ]
+
+      if number_of_steps:
+        hooks.append(tf.train.StopAtStepHook(last_step=number_of_steps))
+
+      _train(
+          discriminator_train_op,
+          generator_train_op,
+          logdir=run_dir,
+          master=FLAGS.master,
+          is_chief=FLAGS.task == 0,
+          hooks=hooks,
+          chief_only_hooks=chief_only_hooks,
+          save_checkpoint_secs=None,
+          save_summaries_steps=FLAGS.save_summaries_steps,
+          hparams=hparams)
+
+def main(_):
+  tf.logging.set_verbosity(tf.logging.INFO)
+  hparams = create_hparams(FLAGS.hparams)
+  run_training(
+      run_dir=FLAGS.train_log_dir,
+      checkpoint_dir=FLAGS.train_log_dir,
+      hparams=hparams)
+
+
+if __name__ == '__main__':
+  tf.app.run()
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+
+class GNB(object):
+
+	def __init__(self):
+		self.possible_labels = ['left', 'keep', 'right']
+		self.clf = GaussianNB()
+		#self.clf = ExtraTreesClassifier(n_estimators=20, max_depth=45, min_samples_split=4, random_state=0)
+		#self.clf = MLPClassifier(hidden_layer_sizes=(4000), 
+			#alpha=1e-8, momentum=.7, verbose=True, tol=1e-7, max_iter=400)
+		self.scaler = StandardScaler()
+
+
+	def train(self, data, labels):
+		"""
+		Trains the classifier with N data points and labels.
+
+		INPUTS
+		data - array of N observations
+		  - Each observation is a tuple with 4 values: s, d, 
+		    s_dot and d_dot.
+		  - Example : [
+			  	[3.5, 0.1, 5.9, -0.02],
+			  	[8.0, -0.3, 3.0, 2.2],
+			  	...
+		  	]
+
+		labels - array of N labels
+		  - Each label is one of "left", "keep", or "right".
+		"""
+		#print(data)
+		#print(labels)
+		#x = [[i[0], i[2], i[3], i[1]%4] for i in data]
+		x = [[i[3]] for i in data]
+		#print(len(x))
+		#self.clf.fit(x, labels)
+		
+		#self.scaler.fit(data[0])
+		#data = self.scaler.transform(data)
+		self.clf.fit(x, labels)
+
+
+	def predict(self, observation):
+		"""
+		Once trained, this method is called and expected to return 
+		a predicted behavior for the given observation.
+
+		INPUTS
+
+		observation - a 4 tuple with s, d, s_dot, d_dot.
+		  - Example: [3.5, 0.1, 8.5, -0.2]
+
+		OUTPUT
+
+		A label representing the best guess of the classifier. Can
+		be one of "left", "keep" or "right".
+		"""
+		# TODO - complete this
+	
+		#i = self.scaler.transform([observation])
+		i = [observation[3]]
+		#prediction = self.clf.predict([[i[1], i[2], i[3], i[1]%4]])
+		prediction = self.clf.predict(i)
+		#print(prediction)
+
+		return prediction
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+# coding=utf-8
+# --------------------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License. See License.txt in the project root for
+# license information.
+#
+# Code generated by Microsoft (R) AutoRest Code Generator.
+# Changes may cause incorrect behavior and will be lost if the code is
+# regenerated.
+# --------------------------------------------------------------------------
+
+from .sub_resource import SubResource
+
+
+class Route(SubResource):
+    """Route resource.
+
+    All required parameters must be populated in order to send to Azure.
+
+    :param id: Resource ID.
+    :type id: str
+    :param address_prefix: The destination CIDR to which the route applies.
+    :type address_prefix: str
+    :param next_hop_type: Required. The type of Azure hop the packet should be
+     sent to. Possible values are: 'VirtualNetworkGateway', 'VnetLocal',
+     'Internet', 'VirtualAppliance', and 'None'. Possible values include:
+     'VirtualNetworkGateway', 'VnetLocal', 'Internet', 'VirtualAppliance',
+     'None'
+    :type next_hop_type: str or
+     ~azure.mgmt.network.v2017_08_01.models.RouteNextHopType
+    :param next_hop_ip_address: The IP address packets should be forwarded to.
+     Next hop values are only allowed in routes where the next hop type is
+     VirtualAppliance.
+    :type next_hop_ip_address: str
+    :param provisioning_state: The provisioning state of the resource.
+     Possible values are: 'Updating', 'Deleting', and 'Failed'.
+    :type provisioning_state: str
+    :param name: The name of the resource that is unique within a resource
+     group. This name can be used to access the resource.
+    :type name: str
+    :param etag: A unique read-only string that changes whenever the resource
+     is updated.
+    :type etag: str
+    """
+
+    _validation = {
+        'next_hop_type': {'required': True},
+    }
+
+    _attribute_map = {
+        'id': {'key': 'id', 'type': 'str'},
+        'address_prefix': {'key': 'properties.addressPrefix', 'type': 'str'},
+        'next_hop_type': {'key': 'properties.nextHopType', 'type': 'str'},
+        'next_hop_ip_address': {'key': 'properties.nextHopIpAddress', 'type': 'str'},
+        'provisioning_state': {'key': 'properties.provisioningState', 'type': 'str'},
+        'name': {'key': 'name', 'type': 'str'},
+        'etag': {'key': 'etag', 'type': 'str'},
+    }
+
+    def __init__(self, **kwargs):
+        super(Route, self).__init__(**kwargs)
+        self.address_prefix = kwargs.get('address_prefix', None)
+        self.next_hop_type = kwargs.get('next_hop_type', None)
+        self.next_hop_ip_address = kwargs.get('next_hop_ip_address', None)
+        self.provisioning_state = kwargs.get('provisioning_state', None)
+        self.name = kwargs.get('name', None)
+        self.etag = kwargs.get('etag', None)
+
+Query: train a neural network for image reconition
+
+************************** NEXT RESULT **************************************
+# coding=utf-8
+# --------------------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License. See License.txt in the project root for
+# license information.
+#
+# Code generated by Microsoft (R) AutoRest Code Generator.
+# Changes may cause incorrect behavior and will be lost if the code is
+# regenerated.
+# --------------------------------------------------------------------------
+
+from .resource import Resource
+
+
+class RouteTable(Resource):
+    """Route table resource.
+
+    Variables are only populated by the server, and will be ignored when
+    sending a request.
+
+    :param id: Resource ID.
+    :type id: str
+    :ivar name: Resource name.
+    :vartype name: str
+    :ivar type: Resource type.
+    :vartype type: str
+    :param location: Resource location.
+    :type location: str
+    :param tags: Resource tags.
+    :type tags: dict[str, str]
+    :param routes: Collection of routes contained within a route table.
+    :type routes: list[~azure.mgmt.network.v2018_04_01.models.Route]
+    :ivar subnets: A collection of references to subnets.
+    :vartype subnets: list[~azure.mgmt.network.v2018_04_01.models.Subnet]
+    :param disable_bgp_route_propagation: Gets or sets whether to disable the
+     routes learned by BGP on that route table. True means disable.
+    :type disable_bgp_route_propagation: bool
+    :param provisioning_state: The provisioning state of the resource.
+     Possible values are: 'Updating', 'Deleting', and 'Failed'.
+    :type provisioning_state: str
+    :param etag: Gets a unique read-only string that changes whenever the
+     resource is updated.
+    :type etag: str
+    """
+
+    _validation = {
+        'name': {'readonly': True},
+        'type': {'readonly': True},
+        'subnets': {'readonly': True},
+    }
+
+    _attribute_map = {
+        'id': {'key': 'id', 'type': 'str'},
+        'name': {'key': 'name', 'type': 'str'},
+        'type': {'key': 'type', 'type': 'str'},
+        'location': {'key': 'location', 'type': 'str'},
+        'tags': {'key': 'tags', 'type': '{str}'},
+        'routes': {'key': 'properties.routes', 'type': '[Route]'},
+        'subnets': {'key': 'properties.subnets', 'type': '[Subnet]'},
+        'disable_bgp_route_propagation': {'key': 'properties.disableBgpRoutePropagation', 'type': 'bool'},
+        'provisioning_state': {'key': 'properties.provisioningState', 'type': 'str'},
+        'etag': {'key': 'etag', 'type': 'str'},
+    }
+
+    def __init__(self, **kwargs):
+        super(RouteTable, self).__init__(**kwargs)
+        self.routes = kwargs.get('routes', None)
+        self.subnets = None
+        self.disable_bgp_route_propagation = kwargs.get('disable_bgp_route_propagation', None)
+        self.provisioning_state = kwargs.get('provisioning_state', None)
+        self.etag = kwargs.get('etag', None)
+
